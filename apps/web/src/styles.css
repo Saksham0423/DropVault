@@ -1,0 +1,130 @@
+@import url("https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap");
+
+:root {
+  font-family: "DM Sans", sans-serif;
+  color: #20231f;
+  background: #f6f4ef;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-optical-sizing: auto;
+  font-weight: 400;
+}
+
+* { box-sizing: border-box; }
+body { min-width: 320px; min-height: 100vh; margin: 0; }
+a { color: inherit; text-decoration: none; }
+
+.page-shell {
+  display: flex;
+  min-height: 100vh;
+  flex-direction: column;
+  padding: 0 8.2%;
+  background: radial-gradient(ellipse at 50% 38%, #fffefa 0, #f6f4ef 58%);
+}
+
+.topbar {
+  display: flex;
+  height: 88px;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid #e7e5dd;
+}
+
+.brand { display: inline-flex; align-items: center; gap: 10px; font-weight: 700; letter-spacing: -0.04em; }
+.brand-mark { display: grid; width: 29px; height: 29px; place-items: center; border-radius: 9px; background: #2b4938; color: #f8f5e9; font-family: "Manrope", sans-serif; font-size: 16px; }
+.status-pill { display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; border: 1px solid #e2e2d8; border-radius: 30px; color: #666c60; font-size: 12px; }
+.status-pill span { width: 7px; height: 7px; border-radius: 50%; background: #769679; }
+
+.welcome-card { width: min(100%, 590px); margin: auto; padding: 75px 0 90px; }
+.eyebrow { margin: 0 0 18px; color: #73806f; font-size: 12px; font-weight: 700; letter-spacing: .13em; text-transform: uppercase; }
+h1 { max-width: 520px; margin: 0; font-family: "Manrope", sans-serif; font-size: clamp(42px, 7vw, 68px); font-weight: 600; letter-spacing: -.065em; line-height: 1.08; }
+.intro { max-width: 440px; margin: 22px 0 36px; color: #777b72; font-size: 16px; line-height: 1.7; }
+.setup-note { display: flex; gap: 14px; align-items: flex-start; padding: 19px; border: 1px solid #e7e5dd; border-radius: 14px; background: #fffefa; }
+.setup-icon { display: grid; width: 32px; height: 32px; flex: 0 0 auto; place-items: center; border-radius: 10px; background: #edf1e8; color: #536d51; font-size: 18px; }
+.setup-note strong { display: block; margin: 2px 0 5px; font-size: 13px; }
+.setup-note p { margin: 0; color: #85877f; font-size: 12px; line-height: 1.5; }
+footer { padding: 22px 0; border-top: 1px solid #e7e5dd; color: #9a9b93; font-size: 11px; text-align: center; }
+
+@media (max-width: 600px) {
+  .page-shell { padding: 0 7%; }
+  .topbar { height: 72px; }
+  .welcome-card { padding: 62px 0 72px; }
+  h1 { font-size: 48px; }
+}
+
+.auth-layout { display: grid; min-height: 100vh; place-items: center; padding: 32px 20px; }
+.auth-card { width: min(100%, 430px); padding: 42px; border: 1px solid #e7e5dd; border-radius: 20px; background: #fffefa; box-shadow: 0 16px 50px #33320b0a; }
+.auth-card .brand { margin-bottom: 48px; }
+.auth-card h1, .dashboard-heading h1 { font-size: clamp(38px, 6vw, 54px); }
+.auth-copy { margin: 13px 0 28px; color: #777b72; font-size: 14px; line-height: 1.6; }
+.auth-form { display: grid; gap: 10px; }
+.auth-form label { margin-top: 5px; color: #4d524a; font-size: 12px; font-weight: 600; }
+.auth-form input, .expiration-label input { width: 100%; padding: 12px 13px; border: 1px solid #dedfd6; border-radius: 9px; outline: none; background: #fff; color: #252a24; font: inherit; font-size: 14px; }
+.auth-form input:focus, .expiration-label input:focus { border-color: #71846e; box-shadow: 0 0 0 3px #71846e20; }
+.primary-button { min-height: 42px; padding: 0 18px; border: 0; border-radius: 9px; background: #2b4938; color: #fffefa; cursor: pointer; font: inherit; font-size: 12px; font-weight: 700; transition: background .15s ease, opacity .15s ease; }
+.primary-button:hover:not(:disabled) { background: #3a5d47; }
+.primary-button:disabled, .quiet-button:disabled, .delete-button:disabled { cursor: wait; opacity: .55; }
+.full-button { margin-top: 14px; }
+.switch-auth { margin: 24px 0 0; color: #777b72; font-size: 12px; text-align: center; }
+.switch-auth button { padding: 0; border: 0; background: none; color: #355640; cursor: pointer; font: inherit; font-weight: 700; }
+.auth-footnote { position: absolute; bottom: 20px; color: #9a9b93; font-size: 11px; }
+.form-message { margin: 5px 0 0; font-size: 12px; line-height: 1.5; }
+.error-message, .dashboard-error { color: #a44036; }
+.success-message { color: #496c4b; }
+.loading-screen { display: grid; min-height: 100vh; place-items: center; color: #73796d; font-size: 14px; }
+.dashboard-shell { display: flex; min-height: 100vh; flex-direction: column; padding: 0 8.2%; }
+.dashboard-topbar { flex-shrink: 0; }
+.account-controls { display: flex; align-items: center; gap: 16px; color: #73796d; font-size: 12px; }
+.quiet-button { padding: 8px 13px; border: 1px solid #e2e2d8; border-radius: 8px; background: #fffefa; color: #4f564d; cursor: pointer; font: inherit; font-size: 11px; font-weight: 600; }
+.dashboard-content { width: min(100%, 900px); flex: 1; margin: 0 auto; padding: 65px 0 80px; }
+.dashboard-heading { display: flex; align-items: end; justify-content: space-between; margin-bottom: 28px; }
+.dashboard-heading .eyebrow { margin-bottom: 10px; }
+.upload-panel { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 20px; padding: 20px; border: 1px solid #e7e5dd; border-radius: 14px; background: #fffefa; }
+.upload-copy { display: flex; align-items: center; gap: 13px; }
+.upload-symbol { display: grid; width: 38px; height: 38px; place-items: center; border-radius: 11px; background: #edf1e8; color: #536d51; font-size: 20px; }
+.upload-copy strong { display: block; font-size: 13px; }
+.upload-copy p { margin: 5px 0 0; color: #85877f; font-size: 11px; }
+.upload-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; }
+.file-picker { display: block; max-width: 180px; overflow: hidden; padding: 10px 12px; border: 1px dashed #d7d9cf; border-radius: 8px; color: #62695f; cursor: pointer; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; clip-path: inset(50%); }
+.expiration-label { display: grid; gap: 4px; color: #767a71; font-size: 10px; }
+.expiration-label input { width: auto; padding: 8px; font-size: 10px; }
+.file-list-heading { display: flex; align-items: baseline; justify-content: space-between; margin: 38px 0 12px; }
+.file-list-heading h2 { margin: 0; font-family: "Manrope", sans-serif; font-size: 17px; letter-spacing: -.03em; }
+.file-list-heading > span { color: #91948b; font-size: 11px; }
+.file-list { margin: 0; padding: 0; list-style: none; }
+.file-row { display: flex; min-height: 74px; align-items: center; gap: 14px; padding: 12px 15px; border-bottom: 1px solid #e9e8e1; }
+.file-icon { display: grid; width: 38px; height: 38px; flex: 0 0 auto; place-items: center; border-radius: 10px; background: #eeeee7; color: #60685d; font-size: 9px; font-weight: 700; }
+.file-details { display: grid; min-width: 0; flex: 1; gap: 5px; }
+.file-details strong { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.file-details span { color: #93968d; font-size: 10px; }
+.expiry-tag { color: #83876f; font-size: 10px; white-space: nowrap; }
+.delete-button { padding: 7px 10px; border: 1px solid #e8ddd8; border-radius: 7px; background: #fffefa; color: #9b4b3d; cursor: pointer; font: inherit; font-size: 10px; }
+.empty-state { display: grid; min-height: 190px; place-content: center; justify-items: center; color: #878b81; text-align: center; }
+.empty-icon { margin-bottom: 8px; color: #a0ad99; font-size: 27px; }
+.empty-state strong { color: #555b52; font-size: 13px; }
+.empty-state p { margin: 6px 0 0; font-size: 11px; }
+.dashboard-error { margin: 14px 0 0; font-size: 12px; }
+
+@media (max-width: 700px) {
+  .dashboard-shell { padding: 0 6%; }
+  .dashboard-content { padding-top: 45px; }
+  .upload-panel { align-items: flex-start; }
+  .upload-controls { width: 100%; align-items: stretch; }
+  .file-picker { flex: 1; max-width: none; }
+  .expiration-label input { min-height: 38px; }
+  .file-row { gap: 9px; padding-inline: 4px; }
+  .expiry-tag { display: none; }
+}
+
+@media (max-width: 480px) {
+  .auth-card { padding: 30px 24px; }
+  .auth-card .brand { margin-bottom: 38px; }
+  .account-controls { gap: 8px; }
+  .account-controls > span { max-width: 135px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dashboard-heading .status-pill { display: none; }
+  .upload-controls .primary-button { flex: 1; }
+  .file-icon { width: 32px; height: 32px; }
+}

@@ -1,0 +1,24 @@
+{
+  "name": "dropvault",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/api",
+    "apps/web"
+  ],
+  "scripts": {
+    "dev": "concurrently -k -n api,web -c blue,green \"npm:dev:api\" \"npm:dev:web\"",
+    "dev:api": "npm --workspace @dropvault/api run dev",
+    "dev:web": "npm --workspace @dropvault/web run dev",
+    "build": "npm run build --workspace @dropvault/api && npm run build --workspace @dropvault/web",
+    "test": "npm run test --workspaces --if-present",
+    "lint": "eslint apps/api/src apps/api/test apps/web/src apps/web/vite.config.ts"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.0",
+    "concurrently": "^9.1.2",
+    "eslint": "^10.0.0",
+    "globals": "^16.0.0",
+    "typescript-eslint": "^8.26.0"
+  }
+}
