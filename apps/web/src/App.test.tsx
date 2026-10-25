@@ -1,9 +1,13 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Session, SupabaseClient } from "@supabase/supabase-js";
 import App from "./App";
 import { AuthProvider } from "./auth/AuthContext";
+import { DEFAULT_MAX_UPLOAD_BYTES, isWithinUploadLimit, resolveUploadLimit } from "./lib/upload-limit";
+
+const mebibyte = 1024 * 1024;
+const frontendUploadLimit = Number(import.meta.env.VITE_MAX_UPLOAD_BYTES) || DEFAULT_MAX_UPLOAD_BYTES;
 
 function makeSession(): Session {
   const user = { id: "user-id", email: "person@example.com", app_metadata: {}, user_metadata: {}, aud: "authenticated", created_at: "2026-01-01T00:00:00.000Z" };
@@ -42,10 +46,24 @@ function makeAuthClient(initialSession: Session | null = null) {
 }
 
 describe("authentication and dashboard", () => {
-  afterEach(() => cleanup());
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
 
   beforeEach(() => {
-    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ files: [] }) })));
+    vi.stubGlobal("fetch", vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => init?.method === "POST"
+      ? { ok: true, status: 201, json: async () => ({ file: { id: "uploaded-id", originalName: "upload.pdf", contentType: "application/pdf", sizeBytes: 10, createdAt: "2026-10-01T00:00:00.000Z", expiresAt: null } }) }
+      : { ok: true, status: 200, json: async () => ({ files: [] }) }));
+  });
+
+  it("keeps the frontend cap bounded by the API limit and accepts the exact byte boundary", () => {
+    expect(resolveUploadLimit()).toBe(DEFAULT_MAX_UPLOAD_BYTES);
+    expect(resolveUploadLimit("10485760", "12582912")).toBe(10 * mebibyte);
+    expect(resolveUploadLimit("12582912", "8388608")).toBe(8 * mebibyte);
+    expect(isWithinUploadLimit(9 * mebibyte, frontendUploadLimit)).toBe(true);
+    expect(isWithinUploadLimit(frontendUploadLimit, frontendUploadLimit)).toBe(true);
+    expect(isWithinUploadLimit(frontendUploadLimit + 1, frontendUploadLimit)).toBe(false);
   });
 
   it("signs up and explains email confirmation", async () => {
@@ -77,5 +95,36 @@ describe("authentication and dashboard", () => {
     await user.click(screen.getByRole("button", { name: "Sign out" }));
     expect(await screen.findByRole("heading", { name: "Welcome back." })).toBeTruthy();
     expect(auth.signOut).toHaveBeenCalledOnce();
+  });
+
+  it("sends a 9 MiB PDF to the API instead of rejecting it in the UI", async () => {
+    const user = userEvent.setup();
+    const { client } = makeAuthClient(makeSession());
+    render(<AuthProvider client={client}><App /></AuthProvider>);
+    await screen.findByRole("heading", { name: "Your files." });
+
+    const file = new File([new Uint8Array(9 * mebibyte)], "nine-mib.pdf", { type: "application/pdf" });
+    fireEvent.change(screen.getByLabelText("Choose a file"), { target: { files: [file] } });
+    await user.click(screen.getByRole("button", { name: "Upload" }));
+
+    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledWith("/api/files", expect.objectContaining({ method: "POST" })));
+  });
+
+  it("rejects a file one byte over the configured cap before making an upload request", async () => {
+    const user = userEvent.setup();
+    const { client } = makeAuthClient(makeSession());
+    render(<AuthProvider client={client}><App /></AuthProvider>);
+    await screen.findByRole("heading", { name: "Your files." });
+
+    const file = new File([new Uint8Array(frontendUploadLimit + 1)], "over-limit.pdf", { type: "application/pdf" });
+    fireEvent.change(screen.getByLabelText("Choose a file"), { target: { files: [file] } });
+    await user.click(screen.getByRole("button", { name: "Upload" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("no larger than");
+    expect(alert.textContent).toContain(frontendUploadLimit % mebibyte === 0
+      ? `${frontendUploadLimit / mebibyte} MiB`
+      : `${(frontendUploadLimit / mebibyte).toFixed(2)} MiB (${frontendUploadLimit.toLocaleString()} bytes)`);
+    expect((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === "POST")).toBe(false);
   });
 });

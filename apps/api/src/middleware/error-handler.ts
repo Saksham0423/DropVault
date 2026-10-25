@@ -27,6 +27,10 @@ function getInternalErrorDetails(error: unknown) {
   };
 }
 
+export function logInternalError(context: string, error: unknown): void {
+  console.error(`[api] ${context}`, getInternalErrorDetails(error));
+}
+
 export const errorHandler: ErrorRequestHandler = (error, _request, response, next) => {
   if (response.headersSent) {
     next(error);
@@ -54,7 +58,7 @@ export const errorHandler: ErrorRequestHandler = (error, _request, response, nex
     return;
   }
 
-  console.error("[api] Unhandled request error", getInternalErrorDetails(error));
+  logInternalError("Unhandled request error", error);
   response.status(500).json({ error: { code: "INTERNAL_ERROR", message: "Internal server error" } });
 };
 

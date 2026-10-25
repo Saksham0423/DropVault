@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { useAuth } from "./auth/AuthContext";
 import { deleteFile, listFiles, uploadFile, type StoredFile } from "./lib/api";
+import { DEFAULT_MAX_UPLOAD_BYTES, isWithinUploadLimit } from "./lib/upload-limit";
 
-const maxFileSize = Number(import.meta.env.VITE_MAX_UPLOAD_BYTES) || 10 * 1024 * 1024;
+const maxFileSize = Number(import.meta.env.VITE_MAX_UPLOAD_BYTES) || DEFAULT_MAX_UPLOAD_BYTES;
 const allowedTypes = new Set(["image/jpeg", "image/png", "image/webp", "application/pdf", "text/plain"]);
 
 function formatMaxSize(size: number): string {
-  return size % (1024 * 1024) === 0 ? `${size / (1024 * 1024)} MB` : `${(size / (1024 * 1024)).toFixed(1)} MB`;
+  if (size % (1024 * 1024) === 0) return `${size / (1024 * 1024)} MiB`;
+  return `${(size / (1024 * 1024)).toFixed(2)} MiB (${size.toLocaleString()} bytes)`;
 }
 
 function formatSize(size: number): string {
@@ -110,8 +112,8 @@ function Dashboard() {
     event.preventDefault();
     if (!session || !selectedFile) return;
     setError("");
-    if (selectedFile.size > maxFileSize) {
-      setError(`Choose a file smaller than ${formatMaxSize(maxFileSize)}.`);
+    if (!isWithinUploadLimit(selectedFile.size, maxFileSize)) {
+      setError(`Choose a file no larger than ${formatMaxSize(maxFileSize)}.`);
       return;
     }
     if (!allowedTypes.has(selectedFile.type)) {

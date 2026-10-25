@@ -18,7 +18,7 @@ DropVault is a temporary file-sharing app. It uses a React/TypeScript web client
    npm run dev
    ```
 
-   The web app runs at <http://localhost:5173> and the API at <http://localhost:3000>. Vite reads the root `.env` and embeds only the public Supabase URL, anon key, and upload-size setting for the browser. The service-role key stays in the API process.
+   The web app runs at <http://localhost:5173> and the API at <http://localhost:3000>. Vite reads the root `.env` and embeds only the public Supabase URL, anon key, and upload-size setting for the browser. The service-role key stays in the API process. Restart the web dev server after changing Vite environment values.
 
 On Windows PowerShell, use `npm.cmd` if the execution policy blocks `npm.ps1`.
 
@@ -34,6 +34,7 @@ On Windows PowerShell, use `npm.cmd` if the execution policy blocks `npm.ps1`.
 | `SUPABASE_SERVICE_ROLE_KEY` | Yes | Backend only; privileged private Storage operations |
 | `SUPABASE_STORAGE_BUCKET` | No | Private bucket name; defaults to `dropvault-files` |
 | `MAX_UPLOAD_BYTES` | No | API upload limit; defaults to `10485760` (10 MiB), maximum `52428800` (50 MiB) |
+| `VITE_MAX_UPLOAD_BYTES` | No | Optional frontend cap; defaults to the API limit and is clamped so it cannot exceed that limit |
 
 Never put `SUPABASE_SERVICE_ROLE_KEY` in frontend code, `VITE_` variables, or browser configuration. The browser only talks directly to Supabase Auth using the anon key; all file bytes and metadata go through the API.
 

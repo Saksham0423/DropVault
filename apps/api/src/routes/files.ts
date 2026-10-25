@@ -5,7 +5,7 @@ import multer from "multer";
 import { fileTypeFromBuffer } from "file-type";
 import { z } from "zod";
 import type { AppDependencies } from "../app.js";
-import { ApiError } from "../middleware/error-handler.js";
+import { ApiError, logInternalError } from "../middleware/error-handler.js";
 import { requireAuth } from "../middleware/require-auth.js";
 import { validateRequest } from "../middleware/validate-request.js";
 
@@ -115,7 +115,12 @@ export function createFilesRouter(dependencies: FileRouteDependencies) {
         );
         response.status(201).json({ file: toFileResponse(result.rows[0]) });
       } catch (error) {
-        await dependencies.storageBucket.remove([storagePath]);
+        try {
+          const cleanup = await dependencies.storageBucket.remove([storagePath]);
+          if (cleanup.error) logInternalError("Storage cleanup after failed upload failed", cleanup.error);
+        } catch (cleanupError) {
+          logInternalError("Storage cleanup after failed upload failed", cleanupError);
+        }
         throw error;
       }
     } catch (error) {
