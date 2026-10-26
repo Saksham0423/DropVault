@@ -6,10 +6,11 @@ import type { SupabaseClients } from "./lib/supabase.js";
 import { errorHandler, notFoundHandler } from "./middleware/error-handler.js";
 import { createFilesRouter } from "./routes/files.js";
 import { healthRouter } from "./routes/health.js";
+import { createShareDownloadRouter } from "./routes/share-download.js";
 
 export interface AppDependencies {
   webOrigin?: string;
-  database?: Pick<Pool, "query">;
+  database?: Pick<Pool, "query" | "connect">;
   authClient?: SupabaseClients["auth"];
   storageBucket?: SupabaseClients["privateBucket"];
   maxUploadBytes?: number;
@@ -23,6 +24,12 @@ export function createApp(dependencies: AppDependencies = {}) {
   app.use(cors({ origin: dependencies.webOrigin ?? "http://localhost:5173" }));
   app.use(express.json({ limit: "1mb" }));
   app.use("/api/health", healthRouter);
+  if (dependencies.database && dependencies.storageBucket) {
+    app.use(
+      "/api/share",
+      createShareDownloadRouter({ database: dependencies.database, storageBucket: dependencies.storageBucket }),
+    );
+  }
   if (dependencies.database && dependencies.authClient && dependencies.storageBucket) {
     app.use(
       "/api/files",

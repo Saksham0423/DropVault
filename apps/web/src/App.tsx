@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { useAuth } from "./auth/AuthContext";
 import { deleteFile, listFiles, uploadFile, type StoredFile } from "./lib/api";
+import ShareLinksPanel from "./ShareLinksPanel";
 import { DEFAULT_MAX_UPLOAD_BYTES, isWithinUploadLimit } from "./lib/upload-limit";
 
 const maxFileSize = Number(import.meta.env.VITE_MAX_UPLOAD_BYTES) || DEFAULT_MAX_UPLOAD_BYTES;
@@ -84,6 +85,7 @@ function Dashboard() {
   const [error, setError] = useState("");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [expiresAt, setExpiresAt] = useState("");
+  const [sharePanelFileId, setSharePanelFileId] = useState<string | null>(null);
 
   async function handleSignOut() {
     try {
@@ -179,11 +181,21 @@ function Dashboard() {
           <div className="empty-state"><span className="empty-icon" aria-hidden="true">◇</span><strong>No files yet</strong><p>Upload your first file to see it here.</p></div>
         ) : (
           <ul className="file-list">
-            {files.map((file) => <li className="file-row" key={file.id}>
-              <span className="file-icon" aria-hidden="true">{file.contentType === "application/pdf" ? "PDF" : file.contentType.startsWith("image/") ? "IMG" : "TXT"}</span>
-              <div className="file-details"><strong title={file.originalName}>{file.originalName}</strong><span>{formatSize(file.sizeBytes)} · Added {new Date(file.createdAt).toLocaleDateString()}</span></div>
-              {file.expiresAt && <span className="expiry-tag">Expires {new Date(file.expiresAt).toLocaleDateString()}</span>}
-              <button className="delete-button" type="button" disabled={deletingId === file.id} onClick={() => void handleDelete(file)} aria-label={`Delete ${file.originalName}`}>{deletingId === file.id ? "Deleting…" : "Delete"}</button>
+            {files.map((file) => <li className="file-entry" key={file.id}>
+              <div className="file-row">
+                <span className="file-icon" aria-hidden="true">{file.contentType === "application/pdf" ? "PDF" : file.contentType.startsWith("image/") ? "IMG" : "TXT"}</span>
+                <div className="file-details"><strong title={file.originalName}>{file.originalName}</strong><span>{formatSize(file.sizeBytes)} · Added {new Date(file.createdAt).toLocaleDateString()}</span></div>
+                {file.expiresAt && <span className="expiry-tag">Expires {new Date(file.expiresAt).toLocaleDateString()}</span>}
+                <button
+                  className="quiet-button share-toggle"
+                  type="button"
+                  aria-expanded={sharePanelFileId === file.id}
+                  aria-controls={`share-panel-${file.id}`}
+                  onClick={() => setSharePanelFileId((current) => current === file.id ? null : file.id)}
+                >{sharePanelFileId === file.id ? "Close sharing" : "Share"}</button>
+                <button className="delete-button" type="button" disabled={deletingId === file.id} onClick={() => void handleDelete(file)} aria-label={`Delete ${file.originalName}`}>{deletingId === file.id ? "Deleting…" : "Delete"}</button>
+              </div>
+              {sharePanelFileId === file.id && session && <div id={`share-panel-${file.id}`}><ShareLinksPanel file={file} token={session.access_token} /></div>}
             </li>)}
           </ul>
         )}

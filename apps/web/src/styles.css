@@ -95,7 +95,8 @@ footer { padding: 22px 0; border-top: 1px solid #e7e5dd; color: #9a9b93; font-si
 .file-list-heading h2 { margin: 0; font-family: "Manrope", sans-serif; font-size: 17px; letter-spacing: -.03em; }
 .file-list-heading > span { color: #91948b; font-size: 11px; }
 .file-list { margin: 0; padding: 0; list-style: none; }
-.file-row { display: flex; min-height: 74px; align-items: center; gap: 14px; padding: 12px 15px; border-bottom: 1px solid #e9e8e1; }
+.file-entry { border-bottom: 1px solid #e9e8e1; }
+.file-row { display: flex; min-height: 74px; align-items: center; gap: 14px; padding: 12px 15px; }
 .file-icon { display: grid; width: 38px; height: 38px; flex: 0 0 auto; place-items: center; border-radius: 10px; background: #eeeee7; color: #60685d; font-size: 9px; font-weight: 700; }
 .file-details { display: grid; min-width: 0; flex: 1; gap: 5px; }
 .file-details strong { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
@@ -107,6 +108,23 @@ footer { padding: 22px 0; border-top: 1px solid #e7e5dd; color: #9a9b93; font-si
 .empty-state strong { color: #555b52; font-size: 13px; }
 .empty-state p { margin: 6px 0 0; font-size: 11px; }
 .dashboard-error { margin: 14px 0 0; font-size: 12px; }
+.share-toggle { flex: 0 0 auto; }
+.share-panel { display: grid; gap: 13px; margin: 0 15px 16px 67px; padding: 15px; border: 1px solid #e7e5dd; border-radius: 11px; background: #fffefa; }
+.share-create { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; }
+.share-create label { display: grid; gap: 5px; color: #767a71; font-size: 10px; }
+.share-create select { min-height: 38px; padding: 8px 10px; border: 1px solid #dedfd6; border-radius: 8px; background: #fff; color: #252a24; font: inherit; font-size: 11px; }
+.share-note { color: #85877f; font-size: 11px; line-height: 1.5; }
+.created-share { display: grid; gap: 8px; color: #496c4b; font-size: 11px; }
+.share-copy-row { display: flex; gap: 8px; }
+.share-copy-row input { min-width: 0; flex: 1; padding: 9px 10px; border: 1px solid #dedfd6; border-radius: 8px; background: #f9f8f3; color: #4f564d; font: inherit; font-size: 11px; }
+.share-list-heading h3 { margin: 0; color: #555b52; font-size: 12px; }
+.share-list { margin: 0; padding: 0; list-style: none; }
+.share-link-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; border-top: 1px solid #eeede7; }
+.share-link-details { display: grid; gap: 4px; color: #85877f; font-size: 10px; }
+.share-link-details .share-status { font-size: 10px; font-weight: 700; text-transform: capitalize; }
+.status-active { color: #496c4b; }
+.status-expired { color: #8a6a35; }
+.status-revoked { color: #9b4b3d; }
 
 @media (max-width: 700px) {
   .dashboard-shell { padding: 0 6%; }
@@ -117,6 +135,10 @@ footer { padding: 22px 0; border-top: 1px solid #e7e5dd; color: #9a9b93; font-si
   .expiration-label input { min-height: 38px; }
   .file-row { gap: 9px; padding-inline: 4px; }
   .expiry-tag { display: none; }
+  .share-panel { margin: 0 4px 12px 4px; padding: 12px; }
+  .share-create { align-items: stretch; }
+  .share-create label { flex: 1; }
+  .share-create .primary-button { align-self: end; }
 }
 
 @media (max-width: 480px) {
@@ -127,4 +149,8 @@ footer { padding: 22px 0; border-top: 1px solid #e7e5dd; color: #9a9b93; font-si
   .dashboard-heading .status-pill { display: none; }
   .upload-controls .primary-button { flex: 1; }
   .file-icon { width: 32px; height: 32px; }
+  .file-row { flex-wrap: wrap; }
+  .file-details { flex-basis: calc(100% - 50px); }
+  .file-row .share-toggle, .file-row .delete-button { margin-left: 41px; }
+  .share-copy-row { align-items: stretch; flex-direction: column; }
 }

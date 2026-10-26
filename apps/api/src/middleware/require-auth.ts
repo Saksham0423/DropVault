@@ -10,7 +10,7 @@ declare module "express-serve-static-core" {
 export function requireAuth(client: Pick<SupabaseClient, "auth">): RequestHandler {
   return async (request, response, next) => {
     const authorization = request.header("authorization");
-    const accessToken = authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
+    const accessToken = authorization?.match(/^Bearer\s+(\S+)$/i)?.[1];
 
     if (!accessToken) {
       response.status(401).json({ error: { code: "UNAUTHORIZED", message: "Authentication required" } });

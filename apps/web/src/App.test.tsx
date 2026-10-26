@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Session, SupabaseClient } from "@supabase/supabase-js";
 import App from "./App";
 import { AuthProvider } from "./auth/AuthContext";
+import { getShareDownloadUrl } from "./lib/api";
 import { DEFAULT_MAX_UPLOAD_BYTES, isWithinUploadLimit, resolveUploadLimit } from "./lib/upload-limit";
 
 const mebibyte = 1024 * 1024;
@@ -49,12 +50,157 @@ describe("authentication and dashboard", () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
   });
 
   beforeEach(() => {
-    vi.stubGlobal("fetch", vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => init?.method === "POST"
-      ? { ok: true, status: 201, json: async () => ({ file: { id: "uploaded-id", originalName: "upload.pdf", contentType: "application/pdf", sizeBytes: 10, createdAt: "2026-10-01T00:00:00.000Z", expiresAt: null } }) }
-      : { ok: true, status: 200, json: async () => ({ files: [] }) }));
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (url.endsWith("/share-links") && method === "POST") {
+        return { ok: true, status: 201, json: async () => ({ link: {
+          id: "created-link", token: "sample-share-token", createdAt: "2026-10-01T00:00:00.000Z", expiresAt: "2026-10-02T00:00:00.000Z",
+        } }) };
+      }
+      if (url.includes("/share-links") && method === "GET") {
+        return { ok: true, status: 200, json: async () => ({ links: [], hasMore: false }) };
+      }
+      if (method === "DELETE") return { ok: true, status: 204, json: async () => undefined };
+      if (method === "POST") {
+        return { ok: true, status: 201, json: async () => ({ file: { id: "uploaded-id", originalName: "upload.pdf", contentType: "application/pdf", sizeBytes: 10, createdAt: "2026-10-01T00:00:00.000Z", expiresAt: null } }) };
+      }
+      return { ok: true, status: 200, json: async () => ({ files: [] }) };
+    }));
+  });
+
+  it("creates a share link with a supported expiration and copies the public download URL", async () => {
+    const user = userEvent.setup();
+    const clipboardWrite = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: clipboardWrite } });
+    const { client } = makeAuthClient(makeSession());
+    const file = { id: "file-id", originalName: "notes.txt", contentType: "text/plain", sizeBytes: 42, createdAt: "2026-10-01T00:00:00.000Z", expiresAt: null };
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/files") return { ok: true, status: 200, json: async () => ({ files: [file] }) };
+      if (url.endsWith("/share-links") && init?.method === "POST") return {
+        ok: true,
+        status: 201,
+        json: async () => ({ link: { id: "created-link", token: "sample-share-token", createdAt: "2026-10-01T00:00:00.000Z", expiresAt: "2026-10-02T00:00:00.000Z" } }),
+      };
+      if (url.endsWith("/share-links")) return { ok: true, status: 200, json: async () => ({ links: [], hasMore: false }) };
+      return { ok: true, status: 200, json: async () => ({ files: [] }) };
+    });
+    render(<AuthProvider client={client}><App /></AuthProvider>);
+    await screen.findByRole("heading", { name: "Your files." });
+    await waitFor(() => expect(screen.getByText("notes.txt")).toBeTruthy());
+    await user.click(screen.getByRole("button", { name: "Share" }));
+    await screen.findByRole("heading", { name: "Existing links" });
+    await user.selectOptions(screen.getByLabelText("Link expires"), "1h");
+    await user.click(screen.getByRole("button", { name: "Create link" }));
+
+    const linkInput = await screen.findByRole("textbox", { name: "Generated share link" }) as HTMLInputElement;
+    expect(linkInput.value).toBe(`${window.location.origin}/api/share/sample-share-token/download`);
+    const createCall = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.find(([input, init]) => String(input).endsWith("/share-links") && (init as RequestInit).method === "POST");
+    expect(createCall).toBeTruthy();
+    const createInit = createCall?.[1] as RequestInit;
+    expect(JSON.parse(String(createInit.body))).toMatchObject({ expiresAt: expect.any(String) });
+    expect(new Date(JSON.parse(String(createInit.body)).expiresAt).getTime()).toBeGreaterThan(Date.now());
+
+    await user.click(screen.getByRole("button", { name: "Copy link" }));
+    expect(clipboardWrite).toHaveBeenCalledWith(linkInput.value);
+    expect(await screen.findByText("Link copied.")).toBeTruthy();
+  });
+
+  it("builds public download URLs for a separately hosted API", () => {
+    vi.stubEnv("VITE_API_BASE_URL", "https://api.dropvault.example/");
+    expect(getShareDownloadUrl("public-token")).toBe("https://api.dropvault.example/api/share/public-token/download");
+  });
+
+  it("provides a selectable link when clipboard access fails", async () => {
+    const user = userEvent.setup();
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: vi.fn().mockRejectedValue(new Error("blocked")) } });
+    const { client } = makeAuthClient(makeSession());
+    const file = { id: "file-id", originalName: "notes.txt", contentType: "text/plain", sizeBytes: 42, createdAt: "2026-10-01T00:00:00.000Z", expiresAt: null };
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/files") return { ok: true, status: 200, json: async () => ({ files: [file] }) };
+      if (url.endsWith("/share-links") && init?.method === "POST") return { ok: true, status: 201, json: async () => ({ link: { id: "created-link", token: "sample-share-token", createdAt: "2026-10-01T00:00:00.000Z", expiresAt: "2026-10-02T00:00:00.000Z" } }) };
+      if (url.endsWith("/share-links")) return { ok: true, status: 200, json: async () => ({ links: [], hasMore: false }) };
+      return { ok: true, status: 200, json: async () => ({ files: [] }) };
+    });
+    render(<AuthProvider client={client}><App /></AuthProvider>);
+    await screen.findByRole("heading", { name: "Your files." });
+    await user.click(await screen.findByRole("button", { name: "Share" }));
+    await user.click(await screen.findByRole("button", { name: "Create link" }));
+    const input = await screen.findByRole("textbox", { name: "Generated share link" }) as HTMLInputElement;
+    await user.click(screen.getByRole("button", { name: "Copy link" }));
+    expect((await screen.findByText("Copy was unavailable. Select the link above and copy it.")).textContent).toBeTruthy();
+    expect(input.selectionStart).toBe(0);
+    expect(input.selectionEnd).toBe(input.value.length);
+  });
+
+  it("loads active, expired, and revoked shares and revokes an active link", async () => {
+    const user = userEvent.setup();
+    const { client } = makeAuthClient(makeSession());
+    const active = { id: "active-link", createdAt: "2026-10-01T00:00:00.000Z", expiresAt: "2026-10-03T00:00:00.000Z", revokedAt: null, status: "active" };
+    const expired = { id: "expired-link", createdAt: "2026-09-01T00:00:00.000Z", expiresAt: "2026-09-02T00:00:00.000Z", revokedAt: null, status: "expired" };
+    const revoked = { id: "revoked-link", createdAt: "2026-08-01T00:00:00.000Z", expiresAt: "2026-08-03T00:00:00.000Z", revokedAt: "2026-08-02T00:00:00.000Z", status: "revoked" };
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/files") return { ok: true, status: 200, json: async () => ({ files: [{ id: "file-id", originalName: "notes.txt", contentType: "text/plain", sizeBytes: 42, createdAt: "2026-10-01T00:00:00.000Z", expiresAt: null }] }) };
+      if (url.includes("/share-links") && init?.method === "DELETE") return { ok: true, status: 204 };
+      if (url.endsWith("/share-links")) return { ok: true, status: 200, json: async () => ({ links: [active, expired, revoked], hasMore: false }) };
+      return { ok: true, status: 200, json: async () => ({ files: [] }) };
+    });
+    render(<AuthProvider client={client}><App /></AuthProvider>);
+    await screen.findByRole("heading", { name: "Your files." });
+    await user.click(await screen.findByRole("button", { name: "Share" }));
+
+    expect(await screen.findByText("active", { selector: "strong" })).toBeTruthy();
+    expect(screen.getByText("expired", { selector: "strong" })).toBeTruthy();
+    expect(screen.getByText("revoked", { selector: "strong" })).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: /Revoke share link/ })).toHaveLength(1);
+    await user.click(screen.getByRole("button", { name: /Revoke share link/ }));
+    await waitFor(() => expect(screen.getAllByText("revoked", { selector: "strong" })).toHaveLength(2));
+    expect((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.some(([input, init]) => String(input).endsWith("/active-link") && (init as RequestInit).method === "DELETE")).toBe(true);
+  });
+
+  it("keeps a link active and reports errors when listing or revocation fails", async () => {
+    const user = userEvent.setup();
+    const { client } = makeAuthClient(makeSession());
+    let failList = true;
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/files") return { ok: true, status: 200, json: async () => ({ files: [{ id: "file-id", originalName: "notes.txt", contentType: "text/plain", sizeBytes: 42, createdAt: "2026-10-01T00:00:00.000Z", expiresAt: null }] }) };
+      if (url.includes("/share-links/") && init?.method === "DELETE") return { ok: false, status: 500, json: async () => ({ error: { message: "Could not revoke." } }) };
+      if (url.endsWith("/share-links") && failList) return { ok: false, status: 503, json: async () => ({ error: { message: "Could not load links." } }) };
+      if (url.endsWith("/share-links")) return { ok: true, status: 200, json: async () => ({ links: [{ id: "active-link", createdAt: "2026-10-01T00:00:00.000Z", expiresAt: "2026-10-03T00:00:00.000Z", revokedAt: null, status: "active" }], hasMore: false }) };
+      return { ok: true, status: 200, json: async () => ({ files: [] }) };
+    });
+    render(<AuthProvider client={client}><App /></AuthProvider>);
+    await screen.findByRole("heading", { name: "Your files." });
+    await user.click(await screen.findByRole("button", { name: "Share" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("Could not load links.");
+    failList = false;
+    await user.click(screen.getByRole("button", { name: "Close sharing" }));
+    await user.click(screen.getByRole("button", { name: "Share" }));
+    await screen.findByText("active", { selector: "strong" });
+    await user.click(screen.getByRole("button", { name: /Revoke share link/ }));
+    expect((await screen.findByRole("alert")).textContent).toContain("Could not revoke.");
+    expect(screen.getByText("active", { selector: "strong" })).toBeTruthy();
+  });
+
+  it("offers the file expiration option when the file has a future expiration", async () => {
+    const user = userEvent.setup();
+    const { client } = makeAuthClient(makeSession());
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockImplementation(async (input: RequestInfo | URL) => String(input) === "/api/files"
+      ? { ok: true, status: 200, json: async () => ({ files: [{ id: "file-id", originalName: "old.txt", contentType: "text/plain", sizeBytes: 4, createdAt: "2026-10-01T00:00:00.000Z", expiresAt: "2026-11-02T00:00:00.000Z" }] }) }
+      : { ok: true, status: 200, json: async () => ({ links: [], hasMore: false }) });
+    render(<AuthProvider client={client}><App /></AuthProvider>);
+    await screen.findByRole("heading", { name: "Your files." });
+    await user.click(await screen.findByRole("button", { name: "Share" }));
+    expect(screen.getByRole("option", { name: "When the file expires" })).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Create link" }) as HTMLButtonElement).disabled).toBe(false);
   });
 
   it("keeps the frontend cap bounded by the API limit and accepts the exact byte boundary", () => {

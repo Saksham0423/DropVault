@@ -47,6 +47,33 @@ describe("authentication middleware", () => {
     expect(response.status).toBe(401);
     expect(auth.getUser).toHaveBeenCalledWith("invalid-token");
   });
+
+  it.each(["Bearer", "Bearer   ", "Basic valid-token", "Bearer first second"])(
+    "rejects a malformed authorization header (%s) before token verification",
+    async (authorization) => {
+      const getUser = vi.fn();
+      const app = express();
+      app.get("/private", requireAuth({ auth: { getUser } } as never), (_request, response) => response.sendStatus(204));
+
+      const response = await request(app).get("/private").set("Authorization", authorization);
+
+      expect(response.status).toBe(401);
+      expect(response.body.error.code).toBe("UNAUTHORIZED");
+      expect(getUser).not.toHaveBeenCalled();
+    },
+  );
+
+  it("rejects an expired bearer token returned as invalid by Supabase", async () => {
+    const auth = { getUser: vi.fn(async () => ({ data: { user: null }, error: new Error("JWT expired") })) };
+    const app = express();
+    app.get("/private", requireAuth({ auth } as never), (_request, response) => response.sendStatus(204));
+
+    const response = await request(app).get("/private").set("Authorization", "Bearer expired-token");
+
+    expect(response.status).toBe(401);
+    expect(response.body).toEqual({ error: { code: "UNAUTHORIZED", message: "Invalid access token" } });
+    expect(auth.getUser).toHaveBeenCalledWith("expired-token");
+  });
 });
 
 describe("private storage configuration", () => {
