@@ -9,8 +9,10 @@ import { createApp } from "../src/app.js";
 import { z } from "zod";
 
 describe("CORS configuration", () => {
-  it("reflects the production Vercel origin on API preflight requests", async () => {
-    const response = await request(createApp())
+  const obsoletePreviewOrigin = "https://drop-vault-mc7u8qet7-saksham0423s-projects.vercel.app";
+
+  it("reflects the production Vercel origin even if WEB_ORIGIN contains an old preview URL", async () => {
+    const response = await request(createApp({ webOrigin: `${obsoletePreviewOrigin}/` }))
       .options("/api/files")
       .set("Origin", "https://drop-vault-nine.vercel.app")
       .set("Access-Control-Request-Method", "POST")
@@ -21,15 +23,35 @@ describe("CORS configuration", () => {
     expect(response.headers["access-control-allow-credentials"]).toBe("true");
   });
 
-  it("normalizes a trailing slash in the configured web origin", async () => {
-    const configuredOrigin = "https://drop-vault-preview.vercel.app/";
+  it("sets the production origin on actual API responses", async () => {
+    const response = await request(createApp())
+      .get("/api/health")
+      .set("Origin", "https://drop-vault-nine.vercel.app");
+
+    expect(response.status).toBe(200);
+    expect(response.headers["access-control-allow-origin"]).toBe("https://drop-vault-nine.vercel.app");
+    expect(response.headers["access-control-allow-credentials"]).toBe("true");
+  });
+
+  it("rejects the obsolete Vercel preview origin even if it is configured", async () => {
+    const response = await request(createApp({ webOrigin: `${obsoletePreviewOrigin}/` }))
+      .options("/api/files")
+      .set("Origin", obsoletePreviewOrigin)
+      .set("Access-Control-Request-Method", "POST");
+
+    expect(response.status).toBe(500);
+    expect(response.headers["access-control-allow-origin"]).toBeUndefined();
+  });
+
+  it("normalizes a trailing slash in a configured custom web origin", async () => {
+    const configuredOrigin = "https://dropvault-preview.example.com/";
     const response = await request(createApp({ webOrigin: configuredOrigin }))
       .options("/api/files")
-      .set("Origin", "https://drop-vault-preview.vercel.app")
+      .set("Origin", "https://dropvault-preview.example.com")
       .set("Access-Control-Request-Method", "POST");
 
     expect(response.status).toBe(204);
-    expect(response.headers["access-control-allow-origin"]).toBe("https://drop-vault-preview.vercel.app");
+    expect(response.headers["access-control-allow-origin"]).toBe("https://dropvault-preview.example.com");
   });
 });
 

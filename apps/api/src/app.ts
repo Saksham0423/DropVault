@@ -16,15 +16,22 @@ export interface AppDependencies {
   maxUploadBytes?: number;
 }
 
+const productionWebOrigin = "https://drop-vault-nine.vercel.app";
+const localWebOrigin = "http://localhost:5173";
+
 export function createApp(dependencies: AppDependencies = {}) {
   const app = express();
+  const configuredWebOrigin = dependencies.webOrigin
+    ? new URL(dependencies.webOrigin).origin
+    : undefined;
+  const configuredHostname = configuredWebOrigin ? new URL(configuredWebOrigin).hostname : undefined;
+  const isAllowedConfiguredOrigin = configuredWebOrigin
+    && (!configuredHostname?.endsWith(".vercel.app") || configuredWebOrigin === productionWebOrigin);
   const allowedOrigins = new Set([
-    dependencies.webOrigin,
-    "https://drop-vault-nine.vercel.app",
-    "http://localhost:5173",
-  ]
-    .filter((origin): origin is string => Boolean(origin))
-    .map((origin) => new URL(origin).origin));
+    productionWebOrigin,
+    localWebOrigin,
+    isAllowedConfiguredOrigin ? configuredWebOrigin : undefined,
+  ].filter((origin): origin is string => Boolean(origin)));
 
   app.disable("x-powered-by");
   app.use(helmet());
