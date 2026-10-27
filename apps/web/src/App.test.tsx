@@ -6,7 +6,7 @@ import App from "./App";
 import { AuthProvider } from "./auth/AuthContext";
 import { getPublicShareUrl, getShareDownloadUrl } from "./lib/api";
 import { DEFAULT_MAX_UPLOAD_BYTES, isWithinUploadLimit, resolveUploadLimit } from "./lib/upload-limit";
-import { customExpirationToIso, getPresetExpiration, uploadExpiryOptions } from "./lib/upload-expiration";
+import { customExpirationToIso, getPresetExpiration, maxUploadLifetimeMilliseconds, toDateTimeLocalValue, uploadExpiryOptions } from "./lib/upload-expiration";
 
 const mebibyte = 1024 * 1024;
 const frontendUploadLimit = Number(import.meta.env.VITE_MAX_UPLOAD_BYTES) || DEFAULT_MAX_UPLOAD_BYTES;
@@ -419,11 +419,12 @@ describe("authentication and dashboard", () => {
   });
 
   it("preserves timezone conversion and rejects missing or past custom expirations", () => {
-    const customDate = "2027-02-03T12:30";
+    const customDate = toDateTimeLocalValue(Date.now() + 60 * 60 * 1000);
     expect(customExpirationToIso(customDate)).toBe(new Date(customDate).toISOString());
     expect(customExpirationToIso("")).toBeUndefined();
     expect(() => customExpirationToIso("2000-01-01T00:00")).toThrow("future");
     expect(() => customExpirationToIso("not-a-date")).toThrow("valid custom expiration");
+    expect(() => customExpirationToIso(toDateTimeLocalValue(Date.now() + maxUploadLifetimeMilliseconds + 60_000))).toThrow("7 days");
   });
 
   it("submits the selected preset expiry through the existing multipart API", async () => {

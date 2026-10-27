@@ -11,12 +11,17 @@ import { requireAuth } from "../middleware/require-auth.js";
 import { validateRequest } from "../middleware/validate-request.js";
 
 const allowedBinaryTypes = new Set(["image/jpeg", "image/png", "image/webp", "application/pdf"]);
+const maxExpirationMilliseconds = 7 * 24 * 60 * 60 * 1000;
 const uploadSchema = z
   .object({ expiresAt: z.string().datetime().optional() })
   .strict()
   .refine((value) => !value.expiresAt || new Date(value.expiresAt).getTime() > Date.now(), {
     path: ["expiresAt"],
     message: "Expiration must be in the future",
+  })
+  .refine((value) => !value.expiresAt || new Date(value.expiresAt).getTime() <= Date.now() + maxExpirationMilliseconds, {
+    path: ["expiresAt"],
+    message: "Expiration cannot be more than 7 days away",
   });
 const idSchema = z.object({ id: z.string().uuid() });
 const shareLinkCreateSchema = z.object({ expiresAt: z.string().datetime() }).strict();
@@ -103,7 +108,9 @@ export function createFilesRouter(dependencies: FileRouteDependencies) {
   router.get("/", async (request, response, next) => {
     try {
       const result = await dependencies.database.query(
-        "select id, original_name, content_type, size_bytes, created_at, expires_at from public.files where owner_id = $1 order by created_at desc",
+        `select id, original_name, content_type, size_bytes, created_at,
+           least(coalesce(expires_at, created_at + interval '7 days'), created_at + interval '7 days') as expires_at
+         from public.files where owner_id = $1 order by created_at desc`,
         [request.user!.id],
       );
       response.json({ files: result.rows.map(toFileResponse) });
@@ -132,9 +139,10 @@ export function createFilesRouter(dependencies: FileRouteDependencies) {
 
       const expirationCheck = await client.query(
         `select
-           expires_at is not null and expires_at <= clock_timestamp() as file_expired,
+           least(coalesce(expires_at, created_at + interval '7 days'), created_at + interval '7 days') <= clock_timestamp() as file_expired,
            $2::timestamptz <= clock_timestamp() as link_expired,
-           expires_at is not null and $2::timestamptz > expires_at as exceeds_file_expiration
+           $2::timestamptz > least(coalesce(expires_at, created_at + interval '7 days'), created_at + interval '7 days') as exceeds_file_expiration,
+           $2::timestamptz > clock_timestamp() + interval '7 days' as exceeds_max_lifetime
          from public.files
          where id = $1 and owner_id = $3`,
         [id, expiresAt, request.user!.id],
@@ -143,9 +151,11 @@ export function createFilesRouter(dependencies: FileRouteDependencies) {
         file_expired: boolean;
         link_expired: boolean;
         exceeds_file_expiration: boolean;
+        exceeds_max_lifetime: boolean;
       };
       if (expiration.file_expired) throw new ApiError(409, "FILE_EXPIRED", "Expired files cannot receive new share links");
       if (expiration.link_expired) throw new ApiError(400, "INVALID_EXPIRATION", "Share link expiration must be in the future");
+      if (expiration.exceeds_max_lifetime) throw new ApiError(400, "INVALID_EXPIRATION", "Share links cannot last more than 7 days");
       if (expiration.exceeds_file_expiration) {
         throw new ApiError(400, "INVALID_EXPIRATION", "Share link expiration cannot exceed file expiration");
       }
@@ -176,14 +186,16 @@ export function createFilesRouter(dependencies: FileRouteDependencies) {
       const finalExpirationCheck = await client.query(
         `select
            share_link.expires_at > clock_timestamp() as link_not_expired,
-           (file.expires_at is null or file.expires_at > clock_timestamp()) as file_not_expired
+           least(coalesce(file.expires_at, file.created_at + interval '7 days'), file.created_at + interval '7 days') > clock_timestamp() as file_not_expired,
+           share_link.expires_at <= share_link.created_at + interval '7 days' as within_max_lifetime
          from public.share_links as share_link
          join public.files as file on file.id = share_link.file_id
          where share_link.id = $1 and file.owner_id = $2`,
         [createdLink.id, request.user!.id],
       );
-      const finalExpiration = finalExpirationCheck.rows[0] as { link_not_expired: boolean; file_not_expired: boolean };
+      const finalExpiration = finalExpirationCheck.rows[0] as { link_not_expired: boolean; file_not_expired: boolean; within_max_lifetime: boolean };
       if (!finalExpiration.file_not_expired) throw new ApiError(409, "FILE_EXPIRED", "Expired files cannot receive new share links");
+      if (!finalExpiration.within_max_lifetime) throw new ApiError(400, "INVALID_EXPIRATION", "Share links cannot last more than 7 days");
       if (!finalExpiration.link_not_expired) {
         throw new ApiError(400, "INVALID_EXPIRATION", "Share link expiration must be in the future");
       }
@@ -226,15 +238,16 @@ export function createFilesRouter(dependencies: FileRouteDependencies) {
       if (!file.rows[0]) throw new ApiError(404, "FILE_NOT_FOUND", "File not found");
 
       const result = await dependencies.database.query(
-        `select id, created_at, expires_at, revoked_at,
+        `select share_link.id, share_link.created_at, share_link.expires_at, share_link.revoked_at,
            case
-             when revoked_at is not null then 'revoked'
-             when expires_at <= statement_timestamp() then 'expired'
+             when share_link.revoked_at is not null then 'revoked'
+             when least(share_link.expires_at, coalesce(file.expires_at, file.created_at + interval '7 days'), file.created_at + interval '7 days') <= statement_timestamp() then 'expired'
              else 'active'
            end as status
-         from public.share_links
-         where file_id = $1
-         order by created_at desc, id desc
+         from public.share_links as share_link
+         join public.files as file on file.id = share_link.file_id
+         where share_link.file_id = $1
+         order by share_link.created_at desc, share_link.id desc
          limit $2`,
         [id, shareLinkListLimit + 1],
       );
@@ -290,7 +303,8 @@ export function createFilesRouter(dependencies: FileRouteDependencies) {
       const ownerId = request.user!.id;
       const storagePath = `${ownerId}/${randomUUID()}`;
       const originalName = getSafeFilename(file.originalname);
-      const expiresAt = (request.validated as { body: z.infer<typeof uploadSchema> }).body.expiresAt ?? null;
+      const expiresAt = (request.validated as { body: z.infer<typeof uploadSchema> }).body.expiresAt
+        ?? new Date(Date.now() + maxExpirationMilliseconds).toISOString();
       const uploadResult = await dependencies.storageBucket.upload(storagePath, file.buffer, {
         contentType: file.mimetype,
         upsert: false,

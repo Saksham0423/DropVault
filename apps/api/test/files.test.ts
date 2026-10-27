@@ -13,7 +13,7 @@ const fileRow = {
   original_name: "notes.pdf",
   content_type: "application/pdf",
   size_bytes: "10",
-  created_at: "2026-10-01T00:00:00.000Z",
+  created_at: new Date().toISOString(),
   expires_at: null,
 };
 const recipientToken = Buffer.alloc(32, 0x5a).toString("base64url");
@@ -89,7 +89,7 @@ function makeApp(options: TestOptions = {}) {
         const rows = params?.[0] === fileId && params?.[1] === ownerId ? [{ id: fileId }] : [];
         return { rows, rowCount: rows.length };
       }
-      if (sql.startsWith("select id, created_at, expires_at, revoked_at")) {
+      if (sql.startsWith("select share_link.id, share_link.created_at, share_link.expires_at, share_link.revoked_at")) {
         const rows = shareLinks
           .filter(() => params?.[0] === fileId)
           .slice(0, Number(params?.[1]))
@@ -130,11 +130,13 @@ function makeApp(options: TestOptions = {}) {
       if (normalizedSql.startsWith("select") && normalizedSql.includes("file_expired")) {
         const expiresAt = options.fileExpiresAt == null ? null : new Date(options.fileExpiresAt);
         const requestedAt = new Date(String(params[1]));
+        const effectiveFileExpiration = expiresAt ?? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
         const rows = params[0] === fileId && params[2] === ownerId
           ? [{
-            file_expired: expiresAt !== null && expiresAt.getTime() <= Date.now(),
+            file_expired: effectiveFileExpiration.getTime() <= Date.now(),
             link_expired: requestedAt.getTime() <= Date.now(),
-            exceeds_file_expiration: expiresAt !== null && requestedAt.getTime() > expiresAt.getTime(),
+            exceeds_file_expiration: requestedAt.getTime() > effectiveFileExpiration.getTime(),
+            exceeds_max_lifetime: requestedAt.getTime() > Date.now() + 7 * 24 * 60 * 60 * 1000,
           }]
           : [];
         return { rows, rowCount: rows.length };
@@ -167,6 +169,7 @@ function makeApp(options: TestOptions = {}) {
           rows: link ? [{
             link_not_expired: options.expireBeforeCommit !== "link" && new Date(link.expires_at).getTime() > now,
             file_not_expired: options.expireBeforeCommit !== "file" && (fileExpiresAt === null || fileExpiresAt.getTime() > now),
+            within_max_lifetime: new Date(link.expires_at).getTime() <= new Date(link.created_at).getTime() + 7 * 24 * 60 * 60 * 1000,
           }] : [],
           rowCount: link ? 1 : 0,
         };
@@ -242,6 +245,9 @@ describe("authenticated file routes", () => {
     expect(response.body.file).not.toHaveProperty("storage_path");
     expect(database.query.mock.calls.at(-1)?.[1]?.[0]).toBe(ownerId);
     expect(storageBucket.upload).toHaveBeenCalledWith(expect.stringMatching(new RegExp(`^${ownerId}/`)), expect.any(Buffer), expect.objectContaining({ upsert: false }));
+    const savedExpiry = new Date(String(database.query.mock.calls.at(-1)?.[1]?.[5])).getTime();
+    expect(savedExpiry).toBeGreaterThan(Date.now() + 6 * 24 * 60 * 60 * 1000);
+    expect(savedExpiry).toBeLessThanOrEqual(Date.now() + 7 * 24 * 60 * 60 * 1000);
   });
 
   it("rejects client-supplied ownership fields before storage or database writes", async () => {
@@ -273,6 +279,7 @@ describe("authenticated file routes", () => {
 
   it.each([
     ["past", new Date(Date.now() - 60 * 1000).toISOString()],
+    ["more than seven days", new Date(Date.now() + 8 * 24 * 60 * 60 * 1000).toISOString()],
     ["invalid", "not-a-timestamp"],
   ])("rejects a %s expiration without storage or metadata writes", async (_case, expiresAt) => {
     const { app, database, storageBucket } = makeApp();
@@ -795,7 +802,7 @@ describe("public recipient downloads", () => {
     );
     expect(database.query.mock.calls[0][0]).toContain("clock_timestamp()");
     expect(database.query.mock.calls[0][0]).toContain("share_link.expires_at > authorization_time.checked_at");
-    expect(database.query.mock.calls[0][0]).toContain("file.expires_at is null or file.expires_at > authorization_time.checked_at");
+    expect(database.query.mock.calls[0][0]).toContain("file.created_at + interval '7 days'");
     expect(response.text).not.toContain(recipientTokenHash);
     expect(JSON.stringify(log.mock.calls)).not.toContain(recipientToken);
   });
@@ -864,8 +871,8 @@ describe("public recipient downloads", () => {
     expect(response.status).toBe(404);
     const sql = String(database.query.mock.calls[0][0]);
     expect(sql).toContain("share_link.expires_at > authorization_time.checked_at");
-    expect(sql).toContain("file.expires_at is null or file.expires_at > authorization_time.checked_at");
-    expect(sql).toContain("least(share_link.expires_at, coalesce(file.expires_at, share_link.expires_at))");
+    expect(sql).toContain("file.created_at + interval '7 days'");
+    expect(sql).toContain("least(share_link.expires_at, coalesce(file.expires_at, file.created_at + interval '7 days')");
     expect(storageBucket.createSignedUrl).not.toHaveBeenCalled();
   });
 

@@ -44,15 +44,15 @@ Never put `SUPABASE_SERVICE_ROLE_KEY` in frontend code, `VITE_` variables, or br
 
 - `GET /api/health` is an unauthenticated health check.
 - `GET /api/files` lists metadata owned by the authenticated user.
-- `POST /api/files` accepts multipart fields `file` and optional ISO-8601 `expiresAt`.
+- `POST /api/files` accepts multipart fields `file` and optional ISO-8601 `expiresAt`. Files are available for at most seven days from upload; an omitted expiration defaults to seven days, and an explicit expiration must be in the future and within that limit.
 - `DELETE /api/files/:id` removes an owned object and its metadata.
-- `POST /api/files/:id/share-links` creates an owner-only share link with a required future `expiresAt`; the raw token is returned once and only its SHA-256 hash is stored.
+- `POST /api/files/:id/share-links` creates an owner-only share link with a required future `expiresAt` no more than seven days away and no later than the file's expiration; the raw token is returned once and only its SHA-256 hash is stored.
 - `GET /api/files/:id/share-links` lists up to the 100 most recently created links and returns `hasMore` when additional links exist. It never returns tokens or hashes.
 - `DELETE /api/files/:id/share-links/:linkId` revokes only the specified owned link and is safe to repeat.
 - `GET /api/share/:token` is public to recipients holding an active token and returns only `{ "filename", "contentType", "sizeBytes", "expiresAt" }`. It returns the same generic unavailable response for malformed, unknown, expired, revoked, or removed shares. It never returns token hashes, owner IDs, storage paths, or file contents.
 - `GET /api/share/:token/download` is public to recipients holding a valid share token. It streams the associated file through the API and does not require a Supabase session.
 
-Private file routes verify the Supabase access token server-side and derive ownership from its user ID. Recipient downloads hash the supplied token and check revocation plus both expiration timestamps against PostgreSQL time. The API creates a private Storage signed URL internally with a maximum 30-second lifetime and a 5-second safety margin, then streams the object to the recipient without returning that URL. The route rechecks share authorization before fetching, but cannot cancel a stream already in progress if a link is revoked or expires. Storage and PostgreSQL behavior has not been verified against live services.
+Private file routes verify the Supabase access token server-side and derive ownership from its user ID. Recipient downloads hash the supplied token and check revocation plus both expiration timestamps against PostgreSQL time. The API enforces a seven-day availability maximum from upload, including for older rows without an expiration timestamp or with a longer legacy expiration. The API creates a private Storage signed URL internally with a maximum 30-second lifetime and a 5-second safety margin, then streams the object to the recipient without returning that URL. The route rechecks share authorization before fetching, but cannot cancel a stream already in progress if a link is revoked or expires. Storage and PostgreSQL behavior has not been verified against live services.
 
 The share token is a bearer credential in the request path. The API does not log requests, but deployment access logs should redact `/api/share/*/download` paths.
 

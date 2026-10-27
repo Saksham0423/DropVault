@@ -16,9 +16,10 @@ const authorizedShareQuery = `with authorization_time as materialized (
   select clock_timestamp() as checked_at
 )
 select file.owner_id, file.storage_path, file.original_name, file.content_type,
-  file.size_bytes, share_link.expires_at,
+  file.size_bytes,
+  least(share_link.expires_at, coalesce(file.expires_at, file.created_at + interval '7 days'), file.created_at + interval '7 days') as expires_at,
   least($2::numeric, floor(extract(epoch from (
-    least(share_link.expires_at, coalesce(file.expires_at, share_link.expires_at)) - authorization_time.checked_at
+    least(share_link.expires_at, coalesce(file.expires_at, file.created_at + interval '7 days'), file.created_at + interval '7 days') - authorization_time.checked_at
   ))) - $3::numeric)::integer as signed_url_ttl_seconds
 from public.share_links as share_link
 join public.files as file on file.id = share_link.file_id
@@ -26,7 +27,8 @@ cross join authorization_time
 where share_link.token_hash = $1
   and share_link.revoked_at is null
   and share_link.expires_at > authorization_time.checked_at
-  and (file.expires_at is null or file.expires_at > authorization_time.checked_at)
+  and share_link.expires_at <= share_link.created_at + interval '7 days'
+  and least(coalesce(file.expires_at, file.created_at + interval '7 days'), file.created_at + interval '7 days') > authorization_time.checked_at
 limit 1`;
 
 interface ShareDownloadDependencies {

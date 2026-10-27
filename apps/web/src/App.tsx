@@ -4,7 +4,7 @@ import { deleteFile, listFiles, uploadFile, type StoredFile } from "./lib/api";
 import ShareLinksPanel from "./ShareLinksPanel";
 import RecipientPage from "./RecipientPage";
 import { DEFAULT_MAX_UPLOAD_BYTES, isWithinUploadLimit } from "./lib/upload-limit";
-import { customExpirationToIso, getPresetExpiration, uploadExpiryOptions, type UploadExpiryChoice } from "./lib/upload-expiration";
+import { customExpirationToIso, getPresetExpiration, maxUploadLifetimeMilliseconds, toDateTimeLocalValue, uploadExpiryOptions, type UploadExpiryChoice } from "./lib/upload-expiration";
 
 const maxFileSize = Number(import.meta.env.VITE_MAX_UPLOAD_BYTES) || DEFAULT_MAX_UPLOAD_BYTES;
 const allowedTypes = new Set(["image/jpeg", "image/png", "image/webp", "application/pdf", "text/plain"]);
@@ -122,7 +122,7 @@ function LocalFileDemo() {
 
 function LandingPage({ onGetStarted, onSignIn }: { onGetStarted: () => void; onSignIn: () => void }) {
   const features = [
-    { icon: "⌑", title: "Private file access", copy: "Your files stay in private storage and are only available through your account or a valid share link." },
+    { icon: "⌑", title: "Private file access", copy: "Your files stay available for up to 7 days in private storage, accessible through your account or a valid share link." },
     { icon: "◷", title: "Links on your time", copy: "Choose when a share link expires, or revoke it whenever you need to." },
     { icon: "◇", title: "Careful token handling", copy: "Share tokens are stored as hashes and checked by the API before each download." },
   ];
@@ -136,7 +136,7 @@ function LandingPage({ onGetStarted, onSignIn }: { onGetStarted: () => void; onS
         <div className="hero-copy">
           <p className="eyebrow"><span className="hero-eyebrow-dot" /> Private file sharing, made simple</p>
           <h1>Your files.<br />Your rules.<br /><span>Your time.</span></h1>
-          <p className="hero-description">Share files privately with links that expire when you choose.</p>
+          <p className="hero-description">Share files privately with links that expire when you choose. Files stay available for up to 7 days.</p>
           <div className="hero-actions"><button className="primary-button hero-primary" type="button" onClick={onGetStarted}>Get started <span aria-hidden="true">→</span></button><button className="hero-secondary" type="button" onClick={onSignIn}>I already have an account</button></div>
           <p className="hero-footnote"><span aria-hidden="true">◇</span> Private storage. Sharing stays in your hands.</p>
         </div>
@@ -165,8 +165,8 @@ function Dashboard() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [expiryChoice, setExpiryChoice] = useState<UploadExpiryChoice>("none");
-  const [presetExpiresAt, setPresetExpiresAt] = useState("");
+  const [expiryChoice, setExpiryChoice] = useState<UploadExpiryChoice>("7d");
+  const [presetExpiresAt, setPresetExpiresAt] = useState(() => getPresetExpiration("7d"));
   const [customExpiresAt, setCustomExpiresAt] = useState("");
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [draggingFile, setDraggingFile] = useState(false);
@@ -230,11 +230,11 @@ function Dashboard() {
         return;
       }
       if (!expiration) {
-        setError("Choose a custom expiration date and time, or select No expiry.");
+        setError("Choose a custom expiration date and time.");
         return;
       }
-    } else if (expiryChoice !== "none") {
-      if (!presetExpiresAt || new Date(presetExpiresAt).getTime() <= Date.now()) {
+    } else {
+      if (!presetExpiresAt || new Date(presetExpiresAt).getTime() <= Date.now() || new Date(presetExpiresAt).getTime() > Date.now() + maxUploadLifetimeMilliseconds) {
         setError("Choose an expiration time in the future.");
         return;
       }
@@ -247,8 +247,8 @@ function Dashboard() {
       const added = await uploadFile(session.access_token, selectedFile, expiration);
       setFiles((current) => [added, ...current]);
       setSelectedFile(null);
-      setExpiryChoice("none");
-      setPresetExpiresAt("");
+      setExpiryChoice("7d");
+      setPresetExpiresAt(getPresetExpiration("7d"));
       setCustomExpiresAt("");
       if (fileInput.current) fileInput.current.value = "";
       setUploadSuccess(`${added.originalName} uploaded successfully.`);
@@ -280,7 +280,7 @@ function Dashboard() {
   function chooseExpiry(choice: UploadExpiryChoice) {
     setExpiryChoice(choice);
     setError("");
-    if (choice !== "none" && choice !== "custom") {
+    if (choice !== "custom") {
       setPresetExpiresAt(getPresetExpiration(choice));
     }
   }
@@ -341,12 +341,11 @@ function Dashboard() {
             <fieldset className="upload-expiry" disabled={uploading}>
               <legend>File expiration</legend>
               <div className="upload-expiry-options" role="group" aria-label="File expiration options">
-                <button type="button" aria-pressed={expiryChoice === "none"} onClick={() => chooseExpiry("none")}>No expiry</button>
                 {uploadExpiryOptions.map((option) => <button key={option.value} type="button" aria-pressed={expiryChoice === option.value} onClick={() => chooseExpiry(option.value)}>{option.label}</button>)}
                 <button type="button" aria-pressed={expiryChoice === "custom"} onClick={() => chooseExpiry("custom")}>Custom</button>
               </div>
-              {expiryChoice !== "none" && expiryChoice !== "custom" && <p className="expiry-selection-note">Expires {new Date(presetExpiresAt).toLocaleString()}</p>}
-              {expiryChoice === "custom" && <label className="expiration-label" htmlFor="expires-at">Keep until <input id="expires-at" type="datetime-local" value={customExpiresAt} onChange={(event) => { setCustomExpiresAt(event.target.value); setError(""); }} /></label>}
+              {expiryChoice !== "custom" && <p className="expiry-selection-note">Expires {new Date(presetExpiresAt).toLocaleString()}</p>}
+              {expiryChoice === "custom" && <label className="expiration-label" htmlFor="expires-at">Keep until <input id="expires-at" type="datetime-local" min={toDateTimeLocalValue(Date.now() + 60_000)} max={toDateTimeLocalValue(Date.now() + maxUploadLifetimeMilliseconds)} value={customExpiresAt} onChange={(event) => { setCustomExpiresAt(event.target.value); setError(""); }} /></label>}
             </fieldset>
             {uploading && <div className="upload-progress-state" role="status"><span className="upload-progress-spinner" aria-hidden="true" /> Uploading {selectedFile?.name ?? "your file"}…</div>}
             {error && <p className="dashboard-error upload-feedback" role="alert">{error}</p>}
