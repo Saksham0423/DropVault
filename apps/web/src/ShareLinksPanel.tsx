@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   createShareLink,
   getPublicShareUrl,
@@ -14,20 +14,8 @@ interface ShareLinksPanelProps {
   token: string;
 }
 
-const expirationChoices = [
-  { value: "1h", label: "1 hour", milliseconds: 60 * 60 * 1000 },
-  { value: "1d", label: "1 day", milliseconds: 24 * 60 * 60 * 1000 },
-  { value: "7d", label: "7 days", milliseconds: 7 * 24 * 60 * 60 * 1000 },
-] as const;
-
 function formatDate(value: string): string {
   return new Date(value).toLocaleString();
-}
-
-function getExpiration(file: StoredFile, choice: string): string {
-  if (choice === "file-expiration" && file.expiresAt) return new Date(file.expiresAt).toISOString();
-  const selected = expirationChoices.find((option) => option.value === choice);
-  return new Date(Date.now() + (selected?.milliseconds ?? expirationChoices[1].milliseconds)).toISOString();
 }
 
 export default function ShareLinksPanel({ file, token }: ShareLinksPanelProps) {
@@ -37,22 +25,12 @@ export default function ShareLinksPanel({ file, token }: ShareLinksPanelProps) {
   const [loadError, setLoadError] = useState("");
   const [createError, setCreateError] = useState("");
   const [copyMessage, setCopyMessage] = useState("");
-  const [expirationChoice, setExpirationChoice] = useState("1d");
   const [creating, setCreating] = useState(false);
   const [revokingId, setRevokingId] = useState<string | null>(null);
   const [createdLink, setCreatedLink] = useState<(CreatedShareLink & { url: string }) | null>(null);
   const linkInput = useRef<HTMLInputElement>(null);
-  const fileExpiration = file.expiresAt ? new Date(file.expiresAt).getTime() : null;
-  const fileExpired = fileExpiration !== null && fileExpiration <= Date.now();
-  const availableChoices = useMemo(() => {
-    const choices: Array<{ value: string; label: string; milliseconds: number }> = expirationChoices.filter((choice) => (
-      fileExpiration === null || Date.now() + choice.milliseconds <= fileExpiration
-    ));
-    if (fileExpiration !== null && !fileExpired) {
-      choices.push({ value: "file-expiration", label: "When the file expires", milliseconds: 0 });
-    }
-    return choices;
-  }, [fileExpiration, fileExpired]);
+  const fileExpiration = file.expiresAt ? Date.parse(file.expiresAt) : Date.parse(file.createdAt) + 7 * 24 * 60 * 60 * 1000;
+  const fileExpired = !Number.isFinite(fileExpiration) || fileExpiration <= Date.now();
 
   useEffect(() => {
     let active = true;
@@ -71,20 +49,13 @@ export default function ShareLinksPanel({ file, token }: ShareLinksPanelProps) {
     return () => { active = false; };
   }, [file.id, token]);
 
-  useEffect(() => {
-    if (!availableChoices.some((choice) => choice.value === expirationChoice)) {
-      setExpirationChoice(availableChoices[0]?.value ?? "1d");
-    }
-  }, [availableChoices, expirationChoice]);
-
-  async function handleCreate(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (creating || fileExpired || availableChoices.length === 0) return;
+  async function handleCreate() {
+    if (creating || fileExpired) return;
     setCreating(true);
     setCreateError("");
     setCopyMessage("");
     try {
-      const created = await createShareLink(token, file.id, getExpiration(file, expirationChoice));
+      const created = await createShareLink(token, file.id);
       setCreatedLink({ ...created, url: getPublicShareUrl(created.token) });
       const newShare: ShareLink = {
         id: created.id,
@@ -138,23 +109,13 @@ export default function ShareLinksPanel({ file, token }: ShareLinksPanelProps) {
 
   return (
     <section className="share-panel" aria-label={`Share links for ${file.originalName}`}>
-      <form className="share-create" onSubmit={(event) => void handleCreate(event)}>
-        <label htmlFor={`share-expiration-${file.id}`}>Link expires
-          <select
-            id={`share-expiration-${file.id}`}
-            value={expirationChoice}
-            onChange={(event) => setExpirationChoice(event.target.value)}
-            disabled={creating || fileExpired || availableChoices.length === 0}
-          >
-            {availableChoices.map((choice) => <option key={choice.value} value={choice.value}>{choice.label}</option>)}
-          </select>
-        </label>
-        <button className="primary-button" type="submit" disabled={creating || fileExpired || availableChoices.length === 0}>
+      <div className="share-create">
+        <span className="share-note">File and new share links expire {formatDate(new Date(fileExpiration).toISOString())}.</span>
+        <button className="primary-button" type="button" onClick={() => void handleCreate()} disabled={creating || fileExpired}>
           {creating ? "Creating…" : "Create link"}
         </button>
         {fileExpired && <span className="share-note">This file has expired and cannot be shared.</span>}
-        {!fileExpired && availableChoices.length === 0 && <span className="share-note">No valid expiration option is available.</span>}
-      </form>
+      </div>
 
       {createError && <p className="dashboard-error" role="alert">{createError}</p>}
       {createdLink && <div className="created-share" role="status">

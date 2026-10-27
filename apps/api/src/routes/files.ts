@@ -24,7 +24,7 @@ const uploadSchema = z
     message: "Expiration cannot be more than 7 days away",
   });
 const idSchema = z.object({ id: z.string().uuid() });
-const shareLinkCreateSchema = z.object({ expiresAt: z.string().datetime() }).strict();
+const shareLinkCreateSchema = z.object({}).strict();
 const shareLinkRouteSchema = z.object({ id: z.string().uuid(), linkId: z.string().uuid() }).strict();
 const shareLinkListLimit = 100;
 const shareTokenAttempts = 3;
@@ -121,7 +121,6 @@ export function createFilesRouter(dependencies: FileRouteDependencies) {
 
   router.post("/:id/share-links", validateRequest(z.object({ params: idSchema, body: shareLinkCreateSchema })), async (request, response, next) => {
     const { id } = (request.validated as { params: z.infer<typeof idSchema> }).params;
-    const { expiresAt } = (request.validated as { body: z.infer<typeof shareLinkCreateSchema> }).body;
     let client: PoolClient | undefined;
     let transactionStarted = false;
     const generatedSecrets: string[] = [];
@@ -139,26 +138,13 @@ export function createFilesRouter(dependencies: FileRouteDependencies) {
 
       const expirationCheck = await client.query(
         `select
-           least(coalesce(expires_at, created_at + interval '7 days'), created_at + interval '7 days') <= clock_timestamp() as file_expired,
-           $2::timestamptz <= clock_timestamp() as link_expired,
-           $2::timestamptz > least(coalesce(expires_at, created_at + interval '7 days'), created_at + interval '7 days') as exceeds_file_expiration,
-           $2::timestamptz > clock_timestamp() + interval '7 days' as exceeds_max_lifetime
+           least(coalesce(expires_at, created_at + interval '7 days'), created_at + interval '7 days') <= clock_timestamp() as file_expired
          from public.files
-         where id = $1 and owner_id = $3`,
-        [id, expiresAt, request.user!.id],
+         where id = $1 and owner_id = $2`,
+        [id, request.user!.id],
       );
-      const expiration = expirationCheck.rows[0] as {
-        file_expired: boolean;
-        link_expired: boolean;
-        exceeds_file_expiration: boolean;
-        exceeds_max_lifetime: boolean;
-      };
+      const expiration = expirationCheck.rows[0] as { file_expired: boolean };
       if (expiration.file_expired) throw new ApiError(409, "FILE_EXPIRED", "Expired files cannot receive new share links");
-      if (expiration.link_expired) throw new ApiError(400, "INVALID_EXPIRATION", "Share link expiration must be in the future");
-      if (expiration.exceeds_max_lifetime) throw new ApiError(400, "INVALID_EXPIRATION", "Share links cannot last more than 7 days");
-      if (expiration.exceeds_file_expiration) {
-        throw new ApiError(400, "INVALID_EXPIRATION", "Share link expiration cannot exceed file expiration");
-      }
 
       let createdLink: { id: string; created_at: Date | string; expires_at: Date | string } | undefined;
       let rawToken: string | undefined;
@@ -168,10 +154,12 @@ export function createFilesRouter(dependencies: FileRouteDependencies) {
         generatedSecrets.push(rawToken, tokenHash);
         const inserted = await client.query(
           `insert into public.share_links (file_id, token_hash, expires_at)
-           values ($1, $2, $3)
+           select file.id, $2, least(coalesce(file.expires_at, file.created_at + interval '7 days'), file.created_at + interval '7 days')
+           from public.files as file
+           where file.id = $1 and file.owner_id = $3
            on conflict (token_hash) do nothing
            returning id, created_at, expires_at`,
-          [id, tokenHash, expiresAt],
+          [id, tokenHash, request.user!.id],
         );
         if (inserted.rows[0]) {
           createdLink = inserted.rows[0] as typeof createdLink;
@@ -187,15 +175,17 @@ export function createFilesRouter(dependencies: FileRouteDependencies) {
         `select
            share_link.expires_at > clock_timestamp() as link_not_expired,
            least(coalesce(file.expires_at, file.created_at + interval '7 days'), file.created_at + interval '7 days') > clock_timestamp() as file_not_expired,
-           share_link.expires_at <= share_link.created_at + interval '7 days' as within_max_lifetime
+           share_link.expires_at <= share_link.created_at + interval '7 days' as within_max_lifetime,
+           share_link.expires_at = least(coalesce(file.expires_at, file.created_at + interval '7 days'), file.created_at + interval '7 days') as matches_file_expiration
          from public.share_links as share_link
          join public.files as file on file.id = share_link.file_id
          where share_link.id = $1 and file.owner_id = $2`,
         [createdLink.id, request.user!.id],
       );
-      const finalExpiration = finalExpirationCheck.rows[0] as { link_not_expired: boolean; file_not_expired: boolean; within_max_lifetime: boolean };
+      const finalExpiration = finalExpirationCheck.rows[0] as { link_not_expired: boolean; file_not_expired: boolean; within_max_lifetime: boolean; matches_file_expiration: boolean };
       if (!finalExpiration.file_not_expired) throw new ApiError(409, "FILE_EXPIRED", "Expired files cannot receive new share links");
       if (!finalExpiration.within_max_lifetime) throw new ApiError(400, "INVALID_EXPIRATION", "Share links cannot last more than 7 days");
+      if (!finalExpiration.matches_file_expiration) throw new ApiError(409, "FILE_EXPIRATION_CHANGED", "File expiration changed while creating the share link");
       if (!finalExpiration.link_not_expired) {
         throw new ApiError(400, "INVALID_EXPIRATION", "Share link expiration must be in the future");
       }
@@ -238,7 +228,9 @@ export function createFilesRouter(dependencies: FileRouteDependencies) {
       if (!file.rows[0]) throw new ApiError(404, "FILE_NOT_FOUND", "File not found");
 
       const result = await dependencies.database.query(
-        `select share_link.id, share_link.created_at, share_link.expires_at, share_link.revoked_at,
+        `select share_link.id, share_link.created_at,
+           least(share_link.expires_at, coalesce(file.expires_at, file.created_at + interval '7 days'), file.created_at + interval '7 days') as expires_at,
+           share_link.revoked_at,
            case
              when share_link.revoked_at is not null then 'revoked'
              when least(share_link.expires_at, coalesce(file.expires_at, file.created_at + interval '7 days'), file.created_at + interval '7 days') <= statement_timestamp() then 'expired'
@@ -313,7 +305,10 @@ export function createFilesRouter(dependencies: FileRouteDependencies) {
 
       try {
         const result = await dependencies.database.query(
-          "insert into public.files (owner_id, storage_path, original_name, content_type, size_bytes, expires_at) values ($1, $2, $3, $4, $5, $6) returning id, original_name, content_type, size_bytes, created_at, expires_at",
+          `insert into public.files (owner_id, storage_path, original_name, content_type, size_bytes, expires_at)
+           values ($1, $2, $3, $4, $5, $6)
+           returning id, original_name, content_type, size_bytes, created_at,
+             least(expires_at, created_at + interval '7 days') as expires_at`,
           [ownerId, storagePath, originalName, file.mimetype, file.size, expiresAt],
         );
         response.status(201).json({ file: toFileResponse(result.rows[0]) });

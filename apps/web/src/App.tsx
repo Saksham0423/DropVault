@@ -123,7 +123,7 @@ function LocalFileDemo() {
 function LandingPage({ onGetStarted, onSignIn }: { onGetStarted: () => void; onSignIn: () => void }) {
   const features = [
     { icon: "⌑", title: "Private file access", copy: "Your files stay available for up to 7 days in private storage, accessible through your account or a valid share link." },
-    { icon: "◷", title: "Links on your time", copy: "Choose when a share link expires, or revoke it whenever you need to." },
+    { icon: "◷", title: "One clear expiration", copy: "Choose how long a file and its share links stay available, then revoke a link whenever you need to." },
     { icon: "◇", title: "Careful token handling", copy: "Share tokens are stored as hashes and checked by the API before each download." },
   ];
   return (
@@ -150,7 +150,7 @@ function LandingPage({ onGetStarted, onSignIn }: { onGetStarted: () => void; onS
 
       <section className="landing-how" aria-labelledby="how-heading">
         <div className="how-heading"><p className="eyebrow">Simple from the start</p><h2 id="how-heading">Three steps.<br />Then it’s on its way.</h2></div>
-        <ol className="how-steps"><li><span>01</span><div><strong>Upload a file</strong><p>Add a file to your private DropVault space.</p></div></li><li><span>02</span><div><strong>Choose an expiration</strong><p>Set how long your share link stays available.</p></div></li><li><span>03</span><div><strong>Share the link</strong><p>Send it to someone who needs the file.</p></div></li></ol>
+        <ol className="how-steps"><li><span>01</span><div><strong>Upload a file</strong><p>Add a file to your private DropVault space.</p></div></li><li><span>02</span><div><strong>Choose an expiration</strong><p>The file and every share link follow the same deadline.</p></div></li><li><span>03</span><div><strong>Share the link</strong><p>Send it to someone who needs the file.</p></div></li></ol>
       </section>
       <footer className="landing-footer"><span>DropVault</span><span>Temporary sharing, thoughtfully built.</span><button type="button" onClick={onGetStarted}>Get started <span aria-hidden="true">→</span></button></footer>
     </main>
@@ -363,7 +363,7 @@ function Dashboard() {
               <div className="file-row">
                 <span className="file-icon" aria-hidden="true">{file.contentType === "application/pdf" ? "PDF" : file.contentType.startsWith("image/") ? "IMG" : "TXT"}</span>
                 <div className="file-details"><strong title={file.originalName}>{file.originalName}</strong><span>{formatSize(file.sizeBytes)} · Added {new Date(file.createdAt).toLocaleDateString()}</span></div>
-                {file.expiresAt && <span className="expiry-tag">Expires {new Date(file.expiresAt).toLocaleDateString()}</span>}
+                {file.expiresAt && <span className="expiry-tag">Expires {new Date(file.expiresAt).toLocaleString()}</span>}
                 <button
                   className="quiet-button share-toggle"
                   type="button"

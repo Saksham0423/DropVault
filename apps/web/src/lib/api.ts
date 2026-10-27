@@ -68,11 +68,11 @@ export function deleteFile(token: string, id: string): Promise<void> {
   return request<void>(token, apiUrl(`/files/${encodeURIComponent(id)}`), { method: "DELETE" });
 }
 
-export async function createShareLink(token: string, fileId: string, expiresAt: string): Promise<CreatedShareLink> {
+export async function createShareLink(token: string, fileId: string): Promise<CreatedShareLink> {
   const result = await request<{ link: CreatedShareLink }>(token, apiUrl(`/files/${encodeURIComponent(fileId)}/share-links`), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ expiresAt }),
+    body: JSON.stringify({}),
   });
   return result.link;
 }

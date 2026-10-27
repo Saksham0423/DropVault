@@ -89,7 +89,7 @@ function makeApp(options: TestOptions = {}) {
         const rows = params?.[0] === fileId && params?.[1] === ownerId ? [{ id: fileId }] : [];
         return { rows, rowCount: rows.length };
       }
-      if (sql.startsWith("select share_link.id, share_link.created_at, share_link.expires_at, share_link.revoked_at")) {
+      if (sql.startsWith("select share_link.id, share_link.created_at,")) {
         const rows = shareLinks
           .filter(() => params?.[0] === fileId)
           .slice(0, Number(params?.[1]))
@@ -128,15 +128,13 @@ function makeApp(options: TestOptions = {}) {
         return { rows, rowCount: rows.length };
       }
       if (normalizedSql.startsWith("select") && normalizedSql.includes("file_expired")) {
-        const expiresAt = options.fileExpiresAt == null ? null : new Date(options.fileExpiresAt);
-        const requestedAt = new Date(String(params[1]));
-        const effectiveFileExpiration = expiresAt ?? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-        const rows = params[0] === fileId && params[2] === ownerId
+        const configuredExpiry = options.fileExpiresAt == null ? null : new Date(options.fileExpiresAt);
+        const fileMaximum = new Date(new Date(fileRow.created_at).getTime() + 7 * 24 * 60 * 60 * 1000);
+        const effectiveFileExpiration = configuredExpiry && configuredExpiry < fileMaximum ? configuredExpiry : fileMaximum;
+        const rows = params[0] === fileId && params[1] === ownerId
           ? [{
+            expires_at: effectiveFileExpiration,
             file_expired: effectiveFileExpiration.getTime() <= Date.now(),
-            link_expired: requestedAt.getTime() <= Date.now(),
-            exceeds_file_expiration: requestedAt.getTime() > effectiveFileExpiration.getTime(),
-            exceeds_max_lifetime: requestedAt.getTime() > Date.now() + 7 * 24 * 60 * 60 * 1000,
           }]
           : [];
         return { rows, rowCount: rows.length };
@@ -155,7 +153,7 @@ function makeApp(options: TestOptions = {}) {
           id: `00000000-0000-4000-8000-${String(shareLinks.length + 1).padStart(12, "0")}`,
           token_hash: String(params[1]),
           created_at: new Date(),
-          expires_at: String(params[2]),
+          expires_at: options.fileExpiresAt ?? new Date(new Date(fileRow.created_at).getTime() + 7 * 24 * 60 * 60 * 1000),
           revoked_at: null,
         };
         shareLinks.push(row);
@@ -170,6 +168,7 @@ function makeApp(options: TestOptions = {}) {
             link_not_expired: options.expireBeforeCommit !== "link" && new Date(link.expires_at).getTime() > now,
             file_not_expired: options.expireBeforeCommit !== "file" && (fileExpiresAt === null || fileExpiresAt.getTime() > now),
             within_max_lifetime: new Date(link.expires_at).getTime() <= new Date(link.created_at).getTime() + 7 * 24 * 60 * 60 * 1000,
+            matches_file_expiration: true,
           }] : [],
           rowCount: link ? 1 : 0,
         };
@@ -503,17 +502,16 @@ describe("authenticated share-link routes", () => {
 
   it("creates a no-store link, returns its raw token once, and persists only its SHA-256 hash", async () => {
     const { app, transactionClient, shareLinks } = makeApp();
-    const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
     const response = await request(app)
       .post(createPath)
       .set("Authorization", "Bearer valid-token")
-      .send({ expiresAt });
+      .send({});
 
     expect(response.status).toBe(201);
     expect(response.headers["cache-control"]).toBe("no-store");
     expect(Object.keys(response.body.link).sort()).toEqual(["createdAt", "expiresAt", "id", "token"]);
     expect(response.body.link.token).toMatch(/^[A-Za-z0-9_-]{43}$/);
-    expect(response.body.link.expiresAt).toBe(expiresAt);
+    expect(response.body.link.expiresAt).toBe(new Date(shareLinks[0].expires_at).toISOString());
     expect(shareLinks).toHaveLength(1);
     expect(shareLinks[0].token_hash).toBe(createHash("sha256").update(response.body.link.token).digest("hex"));
     expect(response.body).not.toHaveProperty("link.token_hash");
@@ -523,16 +521,15 @@ describe("authenticated share-link routes", () => {
     expect(queries[1]).toContain("for update");
     expect(queries[2]).toContain("clock_timestamp()");
     expect(queries[3]).toContain("on conflict (token_hash) do nothing");
+    expect(queries[3]).toContain("least(coalesce(file.expires_at");
     expect(queries[4]).toContain("link_not_expired");
     expect(queries.at(-1)).toBe("commit");
   });
 
   it("allows multiple active links for one non-expiring file", async () => {
     const { app, shareLinks } = makeApp();
-    const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
-
-    const first = await request(app).post(createPath).set("Authorization", "Bearer valid-token").send({ expiresAt });
-    const second = await request(app).post(createPath).set("Authorization", "Bearer valid-token").send({ expiresAt });
+    const first = await request(app).post(createPath).set("Authorization", "Bearer valid-token").send({});
+    const second = await request(app).post(createPath).set("Authorization", "Bearer valid-token").send({});
 
     expect(first.status).toBe(201);
     expect(second.status).toBe(201);
@@ -540,25 +537,24 @@ describe("authenticated share-link routes", () => {
     expect(shareLinks).toHaveLength(2);
   });
 
-  it("allows a link to expire at exactly the associated file expiration", async () => {
+  it("derives the link expiration from the associated file expiration", async () => {
     const fileExpiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
     const { app } = makeApp({ fileExpiresAt });
     const response = await request(app)
       .post(createPath)
       .set("Authorization", "Bearer valid-token")
-      .send({ expiresAt: fileExpiresAt });
+      .send({});
 
     expect(response.status).toBe(201);
-    expect(response.body.link.expiresAt).toBe(fileExpiresAt);
+    expect(response.body.link.expiresAt).toBe(new Date(fileExpiresAt).toISOString());
   });
 
   it("retries token-hash collisions with a new token", async () => {
     const { app, shareLinks, transactionClient } = makeApp({ shareLinkConflicts: 1 });
-    const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
     const response = await request(app)
       .post(createPath)
       .set("Authorization", "Bearer valid-token")
-      .send({ expiresAt });
+      .send({});
 
     expect(response.status).toBe(201);
     expect(transactionClient.query.mock.calls.filter(([sql]) => sql.toLowerCase().includes("insert into public.share_links"))).toHaveLength(2);
@@ -570,7 +566,7 @@ describe("authenticated share-link routes", () => {
     const response = await request(app)
       .post(createPath)
       .set("Authorization", "Bearer valid-token")
-      .send({ expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString() });
+      .send({});
 
     expect(response.status).toBe(503);
     expect(response.body.error.code).toBe("SHARE_LINK_CREATE_FAILED");
@@ -579,27 +575,15 @@ describe("authenticated share-link routes", () => {
     expect(response.body).not.toHaveProperty("link.token");
   });
 
-  it("rejects invalid, missing, past, and beyond-file expiration timestamps before inserting", async () => {
-    const cases: Array<{ expiresAt?: string; fileExpiresAt?: Date | string | null }> = [
-      { expiresAt: "not-a-timestamp" },
-      {},
-      { expiresAt: new Date(Date.now() - 60 * 1000).toISOString() },
-      {
-        expiresAt: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
-        fileExpiresAt: new Date(Date.now() + 60 * 60 * 1000),
-      },
-    ];
+  it("rejects a separately supplied expiration instead of accepting a second setting", async () => {
+    const { app, transactionClient } = makeApp();
+    const response = await request(app)
+      .post(createPath)
+      .set("Authorization", "Bearer valid-token")
+      .send({ expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString() });
 
-    for (const testCase of cases) {
-      const { app, transactionClient } = makeApp({ fileExpiresAt: testCase.fileExpiresAt });
-      const response = await request(app)
-        .post(createPath)
-        .set("Authorization", "Bearer valid-token")
-        .send(testCase.expiresAt ? { expiresAt: testCase.expiresAt } : {});
-
-      expect(response.status).toBe(400);
-      expect(transactionClient.query.mock.calls.some(([sql]) => sql.toLowerCase().includes("insert into public.share_links"))).toBe(false);
-    }
+    expect(response.status).toBe(400);
+    expect(transactionClient.query).not.toHaveBeenCalled();
   });
 
   it("rejects a link for a file that has already expired", async () => {
@@ -607,20 +591,20 @@ describe("authenticated share-link routes", () => {
     const response = await request(app)
       .post(createPath)
       .set("Authorization", "Bearer valid-token")
-      .send({ expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString() });
+      .send({});
 
     expect(response.status).toBe(409);
     expect(response.body.error.code).toBe("FILE_EXPIRED");
     expect(transactionClient.query.mock.calls.some(([sql]) => sql.toLowerCase().includes("insert into public.share_links"))).toBe(false);
   });
 
-  it("rolls back if the file or requested link expires during creation", async () => {
+  it("rolls back if the file or derived share expires during creation", async () => {
     for (const expireBeforeCommit of ["file", "link"] as const) {
       const { app, transactionClient } = makeApp({ expireBeforeCommit });
       const response = await request(app)
         .post(createPath)
         .set("Authorization", "Bearer valid-token")
-        .send({ expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString() });
+        .send({});
 
       expect(response.status).toBe(expireBeforeCommit === "file" ? 409 : 400);
       expect(transactionClient.query).toHaveBeenCalledWith("ROLLBACK");
@@ -634,7 +618,7 @@ describe("authenticated share-link routes", () => {
     const response = await request(app)
       .post(createPath)
       .set("Authorization", "Bearer valid-token")
-      .send({ expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString() });
+      .send({});
 
     expect(response.status).toBe(404);
     expect(response.body.error.code).toBe("FILE_NOT_FOUND");
@@ -645,7 +629,7 @@ describe("authenticated share-link routes", () => {
     const { app, database } = makeApp();
     const linkId = makeShareLink(1).id;
     const responses = await Promise.all([
-      request(app).post(createPath).send({ expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString() }),
+      request(app).post(createPath).send({}),
       request(app).get(createPath),
       request(app).delete(`${createPath}/${linkId}`),
     ]);
@@ -736,7 +720,7 @@ describe("authenticated share-link routes", () => {
     const response = await request(app)
       .post(createPath)
       .set("Authorization", "Bearer valid-token")
-      .send({ expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString() });
+      .send({});
 
     expectGenericServerError(response);
     expect(transactionClient.query).toHaveBeenCalledWith("ROLLBACK");

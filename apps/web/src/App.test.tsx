@@ -74,19 +74,19 @@ describe("authentication and dashboard", () => {
     }));
   });
 
-  it("creates a share link with a supported expiration and copies the public download URL", async () => {
+  it("creates a share link using the file expiration and copies the public URL", async () => {
     const user = userEvent.setup();
     const clipboardWrite = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: clipboardWrite } });
     const { client } = makeAuthClient(makeSession());
-    const file = { id: "file-id", originalName: "notes.txt", contentType: "text/plain", sizeBytes: 42, createdAt: "2026-10-01T00:00:00.000Z", expiresAt: null };
+    const file = { id: "file-id", originalName: "notes.txt", contentType: "text/plain", sizeBytes: 42, createdAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() };
     (globalThis.fetch as ReturnType<typeof vi.fn>).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url === "/api/files") return { ok: true, status: 200, json: async () => ({ files: [file] }) };
       if (url.endsWith("/share-links") && init?.method === "POST") return {
         ok: true,
         status: 201,
-        json: async () => ({ link: { id: "created-link", token: "sample-share-token", createdAt: "2026-10-01T00:00:00.000Z", expiresAt: "2026-10-02T00:00:00.000Z" } }),
+        json: async () => ({ link: { id: "created-link", token: "sample-share-token", createdAt: new Date().toISOString(), expiresAt: file.expiresAt } }),
       };
       if (url.endsWith("/share-links")) return { ok: true, status: 200, json: async () => ({ links: [], hasMore: false }) };
       return { ok: true, status: 200, json: async () => ({ files: [] }) };
@@ -96,7 +96,7 @@ describe("authentication and dashboard", () => {
     await waitFor(() => expect(screen.getByText("notes.txt")).toBeTruthy());
     await user.click(screen.getByRole("button", { name: "Share" }));
     await screen.findByRole("heading", { name: "Existing links" });
-    await user.selectOptions(screen.getByLabelText("Link expires"), "1h");
+    expect(screen.getByText(/File and new share links expire/).textContent).toContain(new Date(file.expiresAt).toLocaleString());
     await user.click(screen.getByRole("button", { name: "Create link" }));
 
     const linkInput = await screen.findByRole("textbox", { name: "Generated share link" }) as HTMLInputElement;
@@ -104,8 +104,9 @@ describe("authentication and dashboard", () => {
     const createCall = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.find(([input, init]) => String(input).endsWith("/share-links") && (init as RequestInit).method === "POST");
     expect(createCall).toBeTruthy();
     const createInit = createCall?.[1] as RequestInit;
-    expect(JSON.parse(String(createInit.body))).toMatchObject({ expiresAt: expect.any(String) });
-    expect(new Date(JSON.parse(String(createInit.body)).expiresAt).getTime()).toBeGreaterThan(Date.now());
+    expect(JSON.parse(String(createInit.body))).toEqual({});
+    expect(createInit.body).not.toContain("expiresAt");
+    expect(screen.getByText(/File and new share links expire/).textContent).toContain(new Date(file.expiresAt).toLocaleString());
 
     await user.click(screen.getByRole("button", { name: "Copy link" }));
     expect(clipboardWrite).toHaveBeenCalledWith(linkInput.value);
@@ -184,7 +185,7 @@ describe("authentication and dashboard", () => {
     const user = userEvent.setup();
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: vi.fn().mockRejectedValue(new Error("blocked")) } });
     const { client } = makeAuthClient(makeSession());
-    const file = { id: "file-id", originalName: "notes.txt", contentType: "text/plain", sizeBytes: 42, createdAt: "2026-10-01T00:00:00.000Z", expiresAt: null };
+    const file = { id: "file-id", originalName: "notes.txt", contentType: "text/plain", sizeBytes: 42, createdAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() };
     (globalThis.fetch as ReturnType<typeof vi.fn>).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url === "/api/files") return { ok: true, status: 200, json: async () => ({ files: [file] }) };
@@ -211,7 +212,7 @@ describe("authentication and dashboard", () => {
     const revoked = { id: "revoked-link", createdAt: "2026-08-01T00:00:00.000Z", expiresAt: "2026-08-03T00:00:00.000Z", revokedAt: "2026-08-02T00:00:00.000Z", status: "revoked" };
     (globalThis.fetch as ReturnType<typeof vi.fn>).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url === "/api/files") return { ok: true, status: 200, json: async () => ({ files: [{ id: "file-id", originalName: "notes.txt", contentType: "text/plain", sizeBytes: 42, createdAt: "2026-10-01T00:00:00.000Z", expiresAt: null }] }) };
+      if (url === "/api/files") return { ok: true, status: 200, json: async () => ({ files: [{ id: "file-id", originalName: "notes.txt", contentType: "text/plain", sizeBytes: 42, createdAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() }] }) };
       if (url.includes("/share-links") && init?.method === "DELETE") return { ok: true, status: 204 };
       if (url.endsWith("/share-links")) return { ok: true, status: 200, json: async () => ({ links: [active, expired, revoked], hasMore: false }) };
       return { ok: true, status: 200, json: async () => ({ files: [] }) };
@@ -235,7 +236,7 @@ describe("authentication and dashboard", () => {
     let failList = true;
     (globalThis.fetch as ReturnType<typeof vi.fn>).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url === "/api/files") return { ok: true, status: 200, json: async () => ({ files: [{ id: "file-id", originalName: "notes.txt", contentType: "text/plain", sizeBytes: 42, createdAt: "2026-10-01T00:00:00.000Z", expiresAt: null }] }) };
+      if (url === "/api/files") return { ok: true, status: 200, json: async () => ({ files: [{ id: "file-id", originalName: "notes.txt", contentType: "text/plain", sizeBytes: 42, createdAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() }] }) };
       if (url.includes("/share-links/") && init?.method === "DELETE") return { ok: false, status: 500, json: async () => ({ error: { message: "Could not revoke." } }) };
       if (url.endsWith("/share-links") && failList) return { ok: false, status: 503, json: async () => ({ error: { message: "Could not load links." } }) };
       if (url.endsWith("/share-links")) return { ok: true, status: 200, json: async () => ({ links: [{ id: "active-link", createdAt: "2026-10-01T00:00:00.000Z", expiresAt: "2026-10-03T00:00:00.000Z", revokedAt: null, status: "active" }], hasMore: false }) };
@@ -254,16 +255,18 @@ describe("authentication and dashboard", () => {
     expect(screen.getByText("active", { selector: "strong" })).toBeTruthy();
   });
 
-  it("offers the file expiration option when the file has a future expiration", async () => {
+  it("shows the file expiration for sharing without a second expiration control", async () => {
     const user = userEvent.setup();
     const { client } = makeAuthClient(makeSession());
+    const fileExpiry = new Date(Date.now() + 60 * 60 * 1000).toISOString();
     (globalThis.fetch as ReturnType<typeof vi.fn>).mockImplementation(async (input: RequestInfo | URL) => String(input) === "/api/files"
-      ? { ok: true, status: 200, json: async () => ({ files: [{ id: "file-id", originalName: "old.txt", contentType: "text/plain", sizeBytes: 4, createdAt: "2026-10-01T00:00:00.000Z", expiresAt: "2026-11-02T00:00:00.000Z" }] }) }
+      ? { ok: true, status: 200, json: async () => ({ files: [{ id: "file-id", originalName: "old.txt", contentType: "text/plain", sizeBytes: 4, createdAt: new Date().toISOString(), expiresAt: fileExpiry }] }) }
       : { ok: true, status: 200, json: async () => ({ links: [], hasMore: false }) });
     render(<AuthProvider client={client}><App /></AuthProvider>);
     await screen.findByRole("heading", { name: "Your files." });
     await user.click(await screen.findByRole("button", { name: "Share" }));
-    expect(screen.getByRole("option", { name: "When the file expires" })).toBeTruthy();
+    expect(screen.getByText(/File and new share links expire/).textContent).toContain(new Date(fileExpiry).toLocaleString());
+    expect(screen.queryByLabelText("Link expires")).toBeNull();
     expect((screen.getByRole("button", { name: "Create link" }) as HTMLButtonElement).disabled).toBe(false);
   });
 
