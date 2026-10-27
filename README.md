@@ -1,5 +1,7 @@
 # DropVault
 
+[Watch the DropVault demo video](https://drive.google.com/file/d/1GtkBBVQq5Z6_L5afAQe1w_RzX7_WrXc2/view?usp=sharing)
+
 DropVault is a private file-sharing app for sending files through links that expire. It is useful when you need to share a report, image, or document for a limited time without making the file publicly browseable or asking the recipient to create an account.
 
 The project combines a React/TypeScript web app, an Express/TypeScript API, PostgreSQL metadata, Supabase Auth, and a private Supabase Storage bucket.
