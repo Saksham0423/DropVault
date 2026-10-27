@@ -22,7 +22,9 @@ export function createApp(dependencies: AppDependencies = {}) {
     dependencies.webOrigin,
     "https://drop-vault-nine.vercel.app",
     "http://localhost:5173",
-  ].filter((origin): origin is string => Boolean(origin)));
+  ]
+    .filter((origin): origin is string => Boolean(origin))
+    .map((origin) => new URL(origin).origin));
 
   app.disable("x-powered-by");
   app.use(helmet());

@@ -5,7 +5,33 @@ import { errorHandler } from "../src/middleware/error-handler.js";
 import { requireAuth } from "../src/middleware/require-auth.js";
 import { validateRequest } from "../src/middleware/validate-request.js";
 import { verifyPrivateBucket } from "../src/lib/supabase.js";
+import { createApp } from "../src/app.js";
 import { z } from "zod";
+
+describe("CORS configuration", () => {
+  it("reflects the production Vercel origin on API preflight requests", async () => {
+    const response = await request(createApp())
+      .options("/api/files")
+      .set("Origin", "https://drop-vault-nine.vercel.app")
+      .set("Access-Control-Request-Method", "POST")
+      .set("Access-Control-Request-Headers", "authorization,content-type");
+
+    expect(response.status).toBe(204);
+    expect(response.headers["access-control-allow-origin"]).toBe("https://drop-vault-nine.vercel.app");
+    expect(response.headers["access-control-allow-credentials"]).toBe("true");
+  });
+
+  it("normalizes a trailing slash in the configured web origin", async () => {
+    const configuredOrigin = "https://drop-vault-preview.vercel.app/";
+    const response = await request(createApp({ webOrigin: configuredOrigin }))
+      .options("/api/files")
+      .set("Origin", "https://drop-vault-preview.vercel.app")
+      .set("Access-Control-Request-Method", "POST");
+
+    expect(response.status).toBe(204);
+    expect(response.headers["access-control-allow-origin"]).toBe("https://drop-vault-preview.vercel.app");
+  });
+});
 
 describe("request validation", () => {
   it("returns a structured 400 response for invalid input", async () => {
