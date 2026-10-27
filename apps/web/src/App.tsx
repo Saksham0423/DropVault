@@ -19,9 +19,9 @@ function formatSize(size: number): string {
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function AuthScreen() {
+function AuthScreen({ initialMode = "login", onBack }: { initialMode?: "login" | "signup"; onBack?: () => void }) {
   const { signIn, signUp } = useAuth();
-  const [mode, setMode] = useState<"login" | "signup">("login");
+  const [mode, setMode] = useState<"login" | "signup">(initialMode);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
@@ -50,10 +50,10 @@ function AuthScreen() {
   return (
     <main className="auth-layout">
       <section className="auth-card" aria-labelledby="auth-heading">
-        <a className="brand" href="/" aria-label="DropVault home"><span className="brand-mark">D</span>DropVault</a>
+        <a className="brand" href="/" aria-label="DropVault home" onClick={(event) => { if (onBack) { event.preventDefault(); onBack(); } }}><span className="brand-mark">D</span>DropVault</a>
         <p className="eyebrow">Your private file space</p>
         <h1 id="auth-heading">{mode === "login" ? "Welcome back." : "Make room to share."}</h1>
-        <p className="auth-copy">Sign in to upload and manage your private files.</p>
+        <p className="auth-copy">{mode === "login" ? "Sign in to upload and manage your private files." : "Create an account to start sharing files on your terms."}</p>
         <form className="auth-form" onSubmit={handleSubmit}>
           <label htmlFor="email">Email</label>
           <input id="email" type="email" autoComplete="email" required value={email} onChange={(event) => setEmail(event.target.value)} />
@@ -73,6 +73,85 @@ function AuthScreen() {
         </p>
       </section>
       <p className="auth-footnote">Private storage. Your files stay yours.</p>
+    </main>
+  );
+}
+
+const demoExpirations = [
+  { value: "1h", label: "1 hour" },
+  { value: "24h", label: "24 hours" },
+  { value: "3d", label: "3 days" },
+  { value: "7d", label: "7 days" },
+] as const;
+
+function LocalFileDemo() {
+  const [file, setFile] = useState<File | null>(null);
+  const [expiration, setExpiration] = useState<(typeof demoExpirations)[number]["value"]>("24h");
+  const [dragging, setDragging] = useState(false);
+
+  function selectFile(candidate?: File) {
+    if (candidate) setFile(candidate);
+  }
+
+  return (
+    <section className="local-demo" aria-label="Local file preview demo">
+      <div className="demo-heading"><span className="demo-status"><span /> Local preview</span><span className="demo-lock" aria-hidden="true">◇</span></div>
+      <p className="demo-title">A little preview.</p>
+      <p className="demo-copy">Choose a file and expiry to see how sharing works. Nothing leaves your device.</p>
+      <label
+        className={`demo-dropzone${dragging ? " is-dragging" : ""}${file ? " has-file" : ""}`}
+        htmlFor="demo-file"
+        onDragOver={(event) => { event.preventDefault(); setDragging(true); }}
+        onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false); }}
+        onDrop={(event) => { event.preventDefault(); setDragging(false); selectFile(event.dataTransfer.files[0]); }}
+      >
+        <input id="demo-file" className="visually-hidden" type="file" onChange={(event) => selectFile(event.target.files?.[0])} />
+        {file ? <><span className="demo-file-icon" aria-hidden="true">FILE</span><span className="demo-file-info"><strong title={file.name}>{file.name}</strong><small>{formatSize(file.size)}</small></span><span className="demo-change">Change</span></>
+          : <><span className="demo-upload-icon" aria-hidden="true">↑</span><span className="demo-drop-copy"><strong>Drop a file here</strong><small>or choose one from your device</small></span></>}
+      </label>
+      <div className="demo-expiry-label">Link duration</div>
+      <div className="demo-expiry-choices" role="group" aria-label="Preview link duration">
+        {demoExpirations.map((option) => <button key={option.value} type="button" aria-pressed={expiration === option.value} onClick={() => setExpiration(option.value)}>{option.label}</button>)}
+      </div>
+      <div className="demo-link-preview"><span className="demo-link-mark" aria-hidden="true">D</span><span><strong>{file ? "Ready to share" : "Your private link"}</strong><small>{file ? `Expires in ${demoExpirations.find((item) => item.value === expiration)?.label}` : "Choose a file to preview"}</small></span><span className="demo-preview-lock" aria-hidden="true">⌑</span></div>
+      <p className="demo-disclaimer">Preview only · no upload or link is created</p>
+    </section>
+  );
+}
+
+function LandingPage({ onGetStarted, onSignIn }: { onGetStarted: () => void; onSignIn: () => void }) {
+  const features = [
+    { icon: "⌑", title: "Private file access", copy: "Your files stay in private storage and are only available through your account or a valid share link." },
+    { icon: "◷", title: "Links on your time", copy: "Choose when a share link expires, or revoke it whenever you need to." },
+    { icon: "◇", title: "Careful token handling", copy: "Share tokens are stored as hashes and checked by the API before each download." },
+  ];
+  return (
+    <main className="landing-shell">
+      <header className="topbar landing-topbar">
+        <a className="brand" href="/" aria-label="DropVault home"><span className="brand-mark">D</span>DropVault</a>
+        <button className="quiet-button landing-signin" type="button" onClick={onSignIn}>Sign in</button>
+      </header>
+      <section className="landing-hero">
+        <div className="hero-copy">
+          <p className="eyebrow"><span className="hero-eyebrow-dot" /> Private file sharing, made simple</p>
+          <h1>Your files.<br />Your rules.<br /><span>Your time.</span></h1>
+          <p className="hero-description">Share files privately with links that expire when you choose.</p>
+          <div className="hero-actions"><button className="primary-button hero-primary" type="button" onClick={onGetStarted}>Get started <span aria-hidden="true">→</span></button><button className="hero-secondary" type="button" onClick={onSignIn}>I already have an account</button></div>
+          <p className="hero-footnote"><span aria-hidden="true">◇</span> Private storage. Sharing stays in your hands.</p>
+        </div>
+        <LocalFileDemo />
+      </section>
+
+      <section className="landing-features" aria-labelledby="features-heading">
+        <div className="landing-section-heading"><p className="eyebrow">Thoughtful by design</p><h2 id="features-heading">Share with a little more peace of mind.</h2></div>
+        <div className="feature-grid">{features.map((feature) => <article className="feature-card" key={feature.title}><span className="feature-icon" aria-hidden="true">{feature.icon}</span><h3>{feature.title}</h3><p>{feature.copy}</p></article>)}</div>
+      </section>
+
+      <section className="landing-how" aria-labelledby="how-heading">
+        <div className="how-heading"><p className="eyebrow">Simple from the start</p><h2 id="how-heading">Three steps.<br />Then it’s on its way.</h2></div>
+        <ol className="how-steps"><li><span>01</span><div><strong>Upload a file</strong><p>Add a file to your private DropVault space.</p></div></li><li><span>02</span><div><strong>Choose an expiration</strong><p>Set how long your share link stays available.</p></div></li><li><span>03</span><div><strong>Share the link</strong><p>Send it to someone who needs the file.</p></div></li></ol>
+      </section>
+      <footer className="landing-footer"><span>DropVault</span><span>Temporary sharing, thoughtfully built.</span><button type="button" onClick={onGetStarted}>Get started <span aria-hidden="true">→</span></button></footer>
     </main>
   );
 }
@@ -209,8 +288,11 @@ function Dashboard() {
 export default function App() {
   const shareToken = new URLSearchParams(window.location.search).get("share");
   const { user, loading, error } = useAuth();
+  const [authMode, setAuthMode] = useState<"login" | "signup" | null>(null);
   if (shareToken !== null) return <RecipientPage token={shareToken} />;
   if (loading) return <main className="loading-screen" aria-live="polite">Opening your private space…</main>;
   if (error) return <main className="loading-screen error-message" role="alert">{error}</main>;
-  return user ? <Dashboard /> : <AuthScreen />;
+  if (user) return <Dashboard />;
+  return authMode ? <AuthScreen key={authMode} initialMode={authMode} onBack={() => setAuthMode(null)} />
+    : <LandingPage onGetStarted={() => setAuthMode("signup")} onSignIn={() => setAuthMode("login")} />;
 }

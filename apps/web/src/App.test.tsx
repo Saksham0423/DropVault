@@ -280,7 +280,8 @@ describe("authentication and dashboard", () => {
     const { client, auth } = makeAuthClient();
     render(<AuthProvider client={client}><App /></AuthProvider>);
 
-    await user.click(await screen.findByRole("button", { name: "Switch to account creation" }));
+    await user.click((await screen.findAllByRole("button", { name: /Get started/ }))[0]);
+    expect(await screen.findByRole("heading", { name: "Make room to share." })).toBeTruthy();
     await user.type(screen.getByLabelText("Email"), "person@example.com");
     await user.type(screen.getByLabelText("Password"), "password123");
     await user.click(screen.getByRole("button", { name: "Create account" }));
@@ -294,6 +295,7 @@ describe("authentication and dashboard", () => {
     const { client, auth } = makeAuthClient();
     render(<AuthProvider client={client}><App /></AuthProvider>);
 
+    await user.click(await screen.findByRole("button", { name: "Sign in" }));
     await user.type(await screen.findByLabelText("Email"), "person@example.com");
     await user.type(screen.getByLabelText("Password"), "password123");
     await user.click(screen.getByRole("button", { name: "Sign in" }));
@@ -304,6 +306,32 @@ describe("authentication and dashboard", () => {
     await user.click(screen.getByRole("button", { name: "Sign out" }));
     expect(await screen.findByRole("heading", { name: "Welcome back." })).toBeTruthy();
     expect(auth.signOut).toHaveBeenCalledOnce();
+  });
+
+  it("shows the landing page and keeps its local file preview offline", async () => {
+    const user = userEvent.setup();
+    const { client } = makeAuthClient();
+    render(<AuthProvider client={client}><App /></AuthProvider>);
+    expect(await screen.findByRole("heading", { name: /Your files\. Your rules\. Your time\./ })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Share with a little more peace of mind." })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: /Three steps/ })).toBeTruthy();
+    const file = new File([new Uint8Array(2048)], "preview.pdf", { type: "application/pdf" });
+    fireEvent.change(document.getElementById("demo-file")!, { target: { files: [file] } });
+    expect(await screen.findByText("preview.pdf")).toBeTruthy();
+    expect(screen.getByText("2.0 KB")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "3 days" }));
+    expect(screen.getByRole("button", { name: "3 days" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByText("Expires in 3 days")).toBeTruthy();
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it("opens login mode from the landing page sign in action", async () => {
+    const user = userEvent.setup();
+    const { client } = makeAuthClient();
+    render(<AuthProvider client={client}><App /></AuthProvider>);
+    await user.click(await screen.findByRole("button", { name: "Sign in" }));
+    expect(await screen.findByRole("heading", { name: "Welcome back." })).toBeTruthy();
+    expect(screen.getByLabelText("Email")).toBeTruthy();
   });
 
   it("sends a 9 MiB PDF to the API instead of rejecting it in the UI", async () => {
