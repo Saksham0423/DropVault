@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
   createShareLink,
-  getShareDownloadUrl,
+  getPublicShareUrl,
   listShareLinks,
   revokeShareLink,
   type CreatedShareLink,
@@ -85,7 +85,7 @@ export default function ShareLinksPanel({ file, token }: ShareLinksPanelProps) {
     setCopyMessage("");
     try {
       const created = await createShareLink(token, file.id, getExpiration(file, expirationChoice));
-      setCreatedLink({ ...created, url: getShareDownloadUrl(created.token) });
+      setCreatedLink({ ...created, url: getPublicShareUrl(created.token) });
       const newShare: ShareLink = {
         id: created.id,
         createdAt: created.createdAt,

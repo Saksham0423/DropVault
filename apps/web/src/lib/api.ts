@@ -24,6 +24,13 @@ export interface CreatedShareLink {
   expiresAt: string;
 }
 
+export interface PublicShareMetadata {
+  filename: string;
+  contentType: string;
+  sizeBytes: number;
+  expiresAt: string | null;
+}
+
 export class ApiError extends Error {}
 
 function apiUrl(path: string): string {
@@ -89,4 +96,34 @@ export function getShareDownloadUrl(shareToken: string): string {
   const apiBaseUrl = import.meta.env.VITE_API_BASE_URL?.replace(/\/+$/, "");
   const apiOrigin = apiBaseUrl || window.location.origin;
   return new URL(`/api/share/${encodeURIComponent(shareToken)}/download`, apiOrigin).toString();
+}
+
+export function getPublicShareUrl(shareToken: string): string {
+  const frontendOrigin = import.meta.env.VITE_WEB_ORIGIN?.replace(/\/+$/, "") || window.location.origin;
+  const url = new URL("/", frontendOrigin);
+  url.searchParams.set("share", shareToken);
+  return url.toString();
+}
+
+export async function getPublicShareMetadata(shareToken: string): Promise<PublicShareMetadata> {
+  const response = await fetch(apiUrl(`/share/${encodeURIComponent(shareToken)}`), { cache: "no-store" });
+  if (!response.ok) {
+    const body = await response.json().catch(() => null) as { error?: { code?: string } } | null;
+    const error = new ApiError(body?.error?.code === "SHARE_UNAVAILABLE"
+      ? "This vault link is no longer available"
+      : `Share metadata request failed (${response.status})`);
+    Object.assign(error, { status: response.status, unavailable: response.status === 404 });
+    throw error;
+  }
+  const result: unknown = await response.json();
+  if (!result || typeof result !== "object") throw new ApiError("Invalid share metadata");
+  const data = result as Record<string, unknown>;
+  if (typeof data.filename !== "string" || !data.filename.trim()
+    || typeof data.contentType !== "string"
+    || typeof data.sizeBytes !== "number" || !Number.isFinite(data.sizeBytes) || data.sizeBytes < 0
+    || (data.expiresAt !== null && data.expiresAt !== undefined
+      && (typeof data.expiresAt !== "string" || Number.isNaN(Date.parse(data.expiresAt))))) {
+    throw new ApiError("Invalid share metadata");
+  }
+  return { ...data, expiresAt: typeof data.expiresAt === "string" ? data.expiresAt : null } as unknown as PublicShareMetadata;
 }

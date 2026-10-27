@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { useAuth } from "./auth/AuthContext";
 import { deleteFile, listFiles, uploadFile, type StoredFile } from "./lib/api";
 import ShareLinksPanel from "./ShareLinksPanel";
+import RecipientPage from "./RecipientPage";
 import { DEFAULT_MAX_UPLOAD_BYTES, isWithinUploadLimit } from "./lib/upload-limit";
 
 const maxFileSize = Number(import.meta.env.VITE_MAX_UPLOAD_BYTES) || DEFAULT_MAX_UPLOAD_BYTES;
@@ -206,7 +207,9 @@ function Dashboard() {
 }
 
 export default function App() {
+  const shareToken = new URLSearchParams(window.location.search).get("share");
   const { user, loading, error } = useAuth();
+  if (shareToken !== null) return <RecipientPage token={shareToken} />;
   if (loading) return <main className="loading-screen" aria-live="polite">Opening your private space…</main>;
   if (error) return <main className="loading-screen error-message" role="alert">{error}</main>;
   return user ? <Dashboard /> : <AuthScreen />;

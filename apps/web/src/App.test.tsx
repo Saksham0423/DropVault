@@ -1,10 +1,10 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Session, SupabaseClient } from "@supabase/supabase-js";
 import App from "./App";
 import { AuthProvider } from "./auth/AuthContext";
-import { getShareDownloadUrl } from "./lib/api";
+import { getPublicShareUrl, getShareDownloadUrl } from "./lib/api";
 import { DEFAULT_MAX_UPLOAD_BYTES, isWithinUploadLimit, resolveUploadLimit } from "./lib/upload-limit";
 
 const mebibyte = 1024 * 1024;
@@ -99,7 +99,7 @@ describe("authentication and dashboard", () => {
     await user.click(screen.getByRole("button", { name: "Create link" }));
 
     const linkInput = await screen.findByRole("textbox", { name: "Generated share link" }) as HTMLInputElement;
-    expect(linkInput.value).toBe(`${window.location.origin}/api/share/sample-share-token/download`);
+    expect(linkInput.value).toBe(`${window.location.origin}/?share=sample-share-token`);
     const createCall = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.find(([input, init]) => String(input).endsWith("/share-links") && (init as RequestInit).method === "POST");
     expect(createCall).toBeTruthy();
     const createInit = createCall?.[1] as RequestInit;
@@ -114,6 +114,69 @@ describe("authentication and dashboard", () => {
   it("builds public download URLs for a separately hosted API", () => {
     vi.stubEnv("VITE_API_BASE_URL", "https://api.dropvault.example/");
     expect(getShareDownloadUrl("public-token")).toBe("https://api.dropvault.example/api/share/public-token/download");
+  });
+
+  it("builds frontend recipient URLs and supports a configured web origin", () => {
+    vi.stubEnv("VITE_WEB_ORIGIN", "https://drop-vault-nine.vercel.app/");
+    expect(getPublicShareUrl("abc123")).toBe("https://drop-vault-nine.vercel.app/?share=abc123");
+  });
+
+  it("shows a public recipient page without requiring authentication", async () => {
+    window.history.replaceState({}, "", "/?share=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
+    const { client, auth } = makeAuthClient(null);
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockImplementation(async (input: RequestInfo | URL) => String(input) === "/api/share/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      ? { ok: true, status: 200, json: async () => ({ filename: "notes.txt", contentType: "text/plain", sizeBytes: 14, expiresAt: new Date(Date.now() + 60_000).toISOString() }) }
+      : { ok: true, status: 200, json: async () => ({ files: [] }) });
+    render(<AuthProvider client={client}><App /></AuthProvider>);
+    expect(await screen.findByRole("heading", { name: "Your file is ready." })).toBeTruthy();
+    expect(screen.getByText("notes.txt")).toBeTruthy();
+    expect(screen.getByRole("link", { name: /Download File/ }).getAttribute("href")).toBe(`${window.location.origin}/api/share/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/download`);
+    expect(auth.getSession).toHaveBeenCalledOnce();
+    expect((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.some(([input]) => String(input) === "/api/files")).toBe(false);
+    window.history.replaceState({}, "", "/");
+  });
+
+  it("shows unavailable and network states without exposing API payloads", async () => {
+    const { client } = makeAuthClient(null);
+    window.history.replaceState({}, "", "/?share=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: false, status: 404, json: async () => ({ error: { code: "SHARE_UNAVAILABLE", message: "private backend details" } }) });
+    const unavailable = render(<AuthProvider client={client}><App /></AuthProvider>);
+    expect(await screen.findByRole("heading", { name: "This vault link is no longer available" })).toBeTruthy();
+    expect(document.body.textContent).not.toContain("private backend details");
+    unavailable.unmount();
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("private network details"));
+    render(<AuthProvider client={client}><App /></AuthProvider>);
+    expect(await screen.findByRole("heading", { name: "We couldn’t check this link." })).toBeTruthy();
+    expect(document.body.textContent).not.toContain("private network details");
+    window.history.replaceState({}, "", "/");
+  });
+
+  it("does not invent an expiry countdown when metadata omits expiry", async () => {
+    const { client } = makeAuthClient(null);
+    window.history.replaceState({}, "", "/?share=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true, status: 200, json: async () => ({ filename: "notes.txt", contentType: "text/plain", sizeBytes: 14 }) });
+    render(<AuthProvider client={client}><App /></AuthProvider>);
+    expect(await screen.findByRole("heading", { name: "Your file is ready." })).toBeTruthy();
+    expect(screen.queryByText(/Link available for/)).toBeNull();
+    window.history.replaceState({}, "", "/");
+  });
+
+  it("ends the countdown at zero and clears its timer on unmount", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-27T12:00:00.000Z"));
+    const clearIntervalSpy = vi.spyOn(window, "clearInterval");
+    const { client } = makeAuthClient(null);
+    window.history.replaceState({}, "", "/?share=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true, status: 200, json: async () => ({ filename: "notes.txt", contentType: "text/plain", sizeBytes: 14, expiresAt: "2026-10-27T12:00:02.000Z" }) });
+    const view = render(<AuthProvider client={client}><App /></AuthProvider>);
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(screen.getByText("0h 00m 02s")).toBeTruthy();
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+    expect(screen.getByRole("heading", { name: "This vault link is no longer available" })).toBeTruthy();
+    view.unmount();
+    expect(clearIntervalSpy).toHaveBeenCalled();
+    vi.useRealTimers();
+    window.history.replaceState({}, "", "/");
   });
 
   it("provides a selectable link when clipboard access fails", async () => {

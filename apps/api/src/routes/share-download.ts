@@ -16,6 +16,7 @@ const authorizedShareQuery = `with authorization_time as materialized (
   select clock_timestamp() as checked_at
 )
 select file.owner_id, file.storage_path, file.original_name, file.content_type,
+  file.size_bytes, share_link.expires_at,
   least($2::numeric, floor(extract(epoch from (
     least(share_link.expires_at, coalesce(file.expires_at, share_link.expires_at)) - authorization_time.checked_at
   ))) - $3::numeric)::integer as signed_url_ttl_seconds
@@ -38,6 +39,8 @@ interface AuthorizedShare {
   storage_path: string;
   original_name: string;
   content_type: string;
+  size_bytes: string | number;
+  expires_at: Date | string;
   signed_url_ttl_seconds: number;
 }
 
@@ -107,6 +110,26 @@ export function createShareDownloadRouter(dependencies: ShareDownloadDependencie
       "X-Content-Type-Options": "nosniff",
     });
     next();
+  });
+
+  router.get("/:token", async (request, response, next) => {
+    const token = request.params.token;
+    if (!isCanonicalShareToken(token)) {
+      next(unavailableShare());
+      return;
+    }
+    try {
+      const share = await findAuthorizedShare(dependencies.database, createHash("sha256").update(token).digest("hex"));
+      if (!share) throw unavailableShare();
+      response.json({
+        filename: getSafeDownloadFilename(share.original_name),
+        contentType: allowedDownloadTypes.has(share.content_type) ? share.content_type : "application/octet-stream",
+        sizeBytes: Number(share.size_bytes),
+        expiresAt: new Date(share.expires_at).toISOString(),
+      });
+    } catch (error) {
+      next(error);
+    }
   });
 
   router.get("/:token/download", async (request, response, next) => {

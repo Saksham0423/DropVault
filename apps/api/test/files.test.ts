@@ -24,6 +24,7 @@ const authorizedShareDownload = {
   original_name: "notes.txt",
   content_type: "text/plain",
   size_bytes: "13",
+  expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
   signed_url_ttl_seconds: 25,
 };
 
@@ -740,6 +741,29 @@ describe("authenticated share-link routes", () => {
 
 describe("public recipient downloads", () => {
   const downloadPath = `/api/share/${recipientToken}/download`;
+
+  it("returns minimal public metadata only for an authorized active share", async () => {
+    const row = { ...authorizedShareDownload, original_name: "notes.txt" };
+    const { app, database } = makeApp({ shareDownloadRows: [row] });
+    const response = await request(app).get(`/api/share/${recipientToken}`);
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ filename: "notes.txt", contentType: "text/plain", sizeBytes: 13, expiresAt: row.expires_at });
+    expect(response.headers["cache-control"]).toBe("private, no-store");
+    expect(response.body).not.toHaveProperty("token_hash");
+    expect(response.body).not.toHaveProperty("storage_path");
+    expect(database.query).toHaveBeenCalledWith(expect.stringContaining("share_link.token_hash = $1"), [recipientTokenHash, 30, 5]);
+  });
+
+  it("does not distinguish unavailable shares or accept malformed tokens", async () => {
+    const { app, database } = makeApp({ shareDownloadRows: [null] });
+    const unknown = await request(app).get(`/api/share/${recipientToken}`);
+    const malformed = await request(app).get("/api/share/not-a-token");
+    expect(unknown.status).toBe(404);
+    expect(malformed.status).toBe(404);
+    expect(unknown.body).toEqual(malformed.body);
+    expect(database.query).toHaveBeenCalledOnce();
+  });
 
   it("streams the authorized object without requiring an application session", async () => {
     const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(
