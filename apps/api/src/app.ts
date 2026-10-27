@@ -18,10 +18,26 @@ export interface AppDependencies {
 
 export function createApp(dependencies: AppDependencies = {}) {
   const app = express();
+  const allowedOrigins = new Set([
+    dependencies.webOrigin,
+    "https://drop-vault-nine.vercel.app",
+    "http://localhost:5173",
+  ].filter((origin): origin is string => Boolean(origin)));
 
   app.disable("x-powered-by");
   app.use(helmet());
-  app.use(cors({ origin: dependencies.webOrigin ?? "http://localhost:5173" }));
+  app.use(
+    cors({
+      origin: (origin, callback) => {
+        if (!origin || allowedOrigins.has(origin)) {
+          callback(null, true);
+        } else {
+          callback(new Error(`Not allowed by CORS: ${origin}`));
+        }
+      },
+      credentials: true,
+    }),
+  );
   app.use(express.json({ limit: "1mb" }));
   app.use("/api/health", healthRouter);
   if (dependencies.database && dependencies.storageBucket) {
