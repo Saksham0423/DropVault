@@ -1,6 +1,35 @@
 # DropVault
 
-DropVault is a temporary file-sharing app. It uses a React/TypeScript web client, an Express/TypeScript API, PostgreSQL metadata, Supabase Auth, and a private Supabase Storage bucket.
+DropVault is a private file-sharing app for sending files through links that expire. It is useful when you need to share a report, image, or document for a limited time without making the file publicly browseable or asking the recipient to create an account.
+
+The project combines a React/TypeScript web app, an Express/TypeScript API, PostgreSQL metadata, Supabase Auth, and a private Supabase Storage bucket.
+
+## Why DropVault
+
+- **Share privately:** Only the owner can manage an uploaded file. Recipients need the unguessable share URL to view its details and download it.
+- **Choose a clear lifetime:** Set the expiration while uploading. The API limits availability to seven days and applies the same effective deadline to the file and its generated links.
+- **Keep recipients out of account setup:** The owner signs in to upload and manage files; recipients open the public share page directly.
+- **Revoke access when plans change:** Owners can revoke a link or delete a file from their dashboard.
+- **Keep storage access behind the API:** The bucket is private. The browser never receives a Storage path or signed Storage URL, and share tokens are stored in the database as SHA-256 hashes.
+
+DropVault currently expires access but does not automatically remove expired objects from Supabase Storage. Owners can delete files from the dashboard; automated storage cleanup is not implemented yet.
+
+## How it works
+
+1. The owner creates an account or signs in with Supabase Auth.
+2. The owner chooses a supported file, selects an expiration, and uploads it. The API checks the file type, size, and contents before storing it in the private bucket.
+3. The owner creates a share link from the uploaded file. The API generates a random bearer token, stores only its SHA-256 hash, and returns the recipient URL once.
+4. The owner copies and sends the URL. The recipient opens the public DropVault page without signing in.
+5. The recipient page requests minimal file metadata. When the recipient downloads, the API validates the token and expiry, then streams the file from private Storage.
+6. At expiry, or after the owner revokes the link, the API returns a generic unavailable response. The owner can also delete the file and its stored object at any time.
+
+Recipient URLs use this format:
+
+```text
+https://drop-vault-nine.vercel.app/?share=<token>
+```
+
+The frontend presents the upload and link-management screens; the API owns authorization, validation, token checks, and file streaming. PostgreSQL connects each file to its owner and links, while Supabase Storage holds the private file bytes.
 
 ## Requirements and setup
 
