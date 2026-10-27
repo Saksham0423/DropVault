@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { useAuth } from "./auth/AuthContext";
 import { deleteFile, listFiles, uploadFile, type StoredFile } from "./lib/api";
 import ShareLinksPanel from "./ShareLinksPanel";
 import RecipientPage from "./RecipientPage";
 import { DEFAULT_MAX_UPLOAD_BYTES, isWithinUploadLimit } from "./lib/upload-limit";
+import { customExpirationToIso, getPresetExpiration, uploadExpiryOptions, type UploadExpiryChoice } from "./lib/upload-expiration";
 
 const maxFileSize = Number(import.meta.env.VITE_MAX_UPLOAD_BYTES) || DEFAULT_MAX_UPLOAD_BYTES;
 const allowedTypes = new Set(["image/jpeg", "image/png", "image/webp", "application/pdf", "text/plain"]);
@@ -164,7 +165,24 @@ function Dashboard() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [expiresAt, setExpiresAt] = useState("");
+  const [expiryChoice, setExpiryChoice] = useState<UploadExpiryChoice>("none");
+  const [presetExpiresAt, setPresetExpiresAt] = useState("");
+  const [customExpiresAt, setCustomExpiresAt] = useState("");
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [draggingFile, setDraggingFile] = useState(false);
+  const [uploadSuccess, setUploadSuccess] = useState("");
+  const uploadLock = useRef(false);
+  const fileInput = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!selectedFile || !["image/jpeg", "image/png", "image/webp"].includes(selectedFile.type)) {
+      setPreviewUrl(null);
+      return;
+    }
+    const objectUrl = URL.createObjectURL(selectedFile);
+    setPreviewUrl(objectUrl);
+    return () => URL.revokeObjectURL(objectUrl);
+  }, [selectedFile]);
   const [sharePanelFileId, setSharePanelFileId] = useState<string | null>(null);
 
   async function handleSignOut() {
@@ -192,8 +210,9 @@ function Dashboard() {
 
   async function handleUpload(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!session || !selectedFile) return;
+    if (!session || !selectedFile || uploadLock.current) return;
     setError("");
+    setUploadSuccess("");
     if (!isWithinUploadLimit(selectedFile.size, maxFileSize)) {
       setError(`Choose a file no larger than ${formatMaxSize(maxFileSize)}.`);
       return;
@@ -202,19 +221,67 @@ function Dashboard() {
       setError("Use a PDF, JPEG, PNG, WebP, or plain text file.");
       return;
     }
+    let expiration: string | undefined;
+    if (expiryChoice === "custom") {
+      try {
+        expiration = customExpirationToIso(customExpiresAt);
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : "Choose a valid future expiration.");
+        return;
+      }
+      if (!expiration) {
+        setError("Choose a custom expiration date and time, or select No expiry.");
+        return;
+      }
+    } else if (expiryChoice !== "none") {
+      if (!presetExpiresAt || new Date(presetExpiresAt).getTime() <= Date.now()) {
+        setError("Choose an expiration time in the future.");
+        return;
+      }
+      expiration = presetExpiresAt;
+    }
+
+    uploadLock.current = true;
     setUploading(true);
     try {
-      const expiration = expiresAt ? new Date(expiresAt).toISOString() : undefined;
       const added = await uploadFile(session.access_token, selectedFile, expiration);
       setFiles((current) => [added, ...current]);
       setSelectedFile(null);
-      setExpiresAt("");
-      const input = document.getElementById("upload-file") as HTMLInputElement | null;
-      if (input) input.value = "";
+      setExpiryChoice("none");
+      setPresetExpiresAt("");
+      setCustomExpiresAt("");
+      if (fileInput.current) fileInput.current.value = "";
+      setUploadSuccess(`${added.originalName} uploaded successfully.`);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Upload failed. Please try again.");
     } finally {
       setUploading(false);
+      uploadLock.current = false;
+    }
+  }
+
+  function chooseFile(file?: File) {
+    if (!file) return;
+    setUploadSuccess("");
+    if (!isWithinUploadLimit(file.size, maxFileSize)) {
+      setSelectedFile(null);
+      setError(`Choose a file no larger than ${formatMaxSize(maxFileSize)}.`);
+      return;
+    }
+    if (!allowedTypes.has(file.type)) {
+      setSelectedFile(null);
+      setError("Use a PDF, JPEG, PNG, WebP, or plain text file.");
+      return;
+    }
+    setSelectedFile(file);
+    setError("");
+  }
+
+  function chooseExpiry(choice: UploadExpiryChoice) {
+    setExpiryChoice(choice);
+    setError("");
+    if (choice !== "none" && choice !== "custom") {
+      setPresetExpiresAt(getPresetExpiration(choice));
     }
   }
 
@@ -244,17 +311,49 @@ function Dashboard() {
           <span className="status-pill"><span /> Private by design</span>
         </div>
 
-        <form className="upload-panel" onSubmit={handleUpload}>
+        <form className="upload-panel" onSubmit={(event) => void handleUpload(event)}>
           <div className="upload-copy"><span className="upload-symbol" aria-hidden="true">↑</span><div><strong>Upload a file</strong><p>PDF, JPEG, PNG, WebP, or plain text · up to {formatMaxSize(maxFileSize)}</p></div></div>
-          <div className="upload-controls">
-            <label className="file-picker" htmlFor="upload-file">{selectedFile?.name ?? "Choose a file"}</label>
-            <input id="upload-file" className="visually-hidden" type="file" accept=".pdf,.jpg,.jpeg,.png,.webp,.txt" onChange={(event) => setSelectedFile(event.target.files?.[0] ?? null)} />
-            <label className="expiration-label" htmlFor="expires-at">Keep until <input id="expires-at" type="datetime-local" value={expiresAt} onChange={(event) => setExpiresAt(event.target.value)} /></label>
-            <button className="primary-button" type="submit" disabled={uploading || !selectedFile}>{uploading ? "Uploading…" : "Upload"}</button>
+          <div className="upload-workflow">
+            <input ref={fileInput} id="upload-file" className="visually-hidden" type="file" accept=".pdf,.jpg,.jpeg,.png,.webp,.txt" aria-label="Choose a file to upload" disabled={uploading} onChange={(event) => { chooseFile(event.target.files?.[0]); event.currentTarget.value = ""; }} />
+            <button
+              className={`upload-dropzone${draggingFile ? " is-dragging" : ""}${selectedFile ? " has-selection" : ""}`}
+              type="button"
+              disabled={uploading}
+              aria-label={selectedFile ? `Replace ${selectedFile.name}` : "Choose a file to upload"}
+              aria-describedby="upload-dropzone-help"
+              onClick={() => fileInput.current?.click()}
+              onDragOver={(event) => { event.preventDefault(); event.stopPropagation(); setDraggingFile(true); }}
+              onDragLeave={(event) => { event.preventDefault(); event.stopPropagation(); if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDraggingFile(false); }}
+              onDrop={(event) => { event.preventDefault(); event.stopPropagation(); setDraggingFile(false); chooseFile(event.dataTransfer.files[0]); }}
+            >
+              <span className="upload-drop-icon" aria-hidden="true">{draggingFile ? "↓" : "↑"}</span>
+              <span className="upload-drop-text"><strong>{selectedFile ? "Drop another file to replace it" : "Drop your file here"}</strong><small id="upload-dropzone-help">or click to browse · one file at a time</small></span>
+              <span className="upload-browse">Browse files</span>
+            </button>
+
+            {selectedFile && <div className="selected-file-card" role="status">
+              {previewUrl ? <img className="selected-image-preview" src={previewUrl} alt={`Preview of ${selectedFile.name}`} />
+                : <span className={`selected-file-icon${selectedFile.type === "application/pdf" ? " pdf" : ""}`} aria-hidden="true">{selectedFile.type === "application/pdf" ? "PDF" : "TXT"}</span>}
+              <span className="selected-file-info"><strong title={selectedFile.name}>{selectedFile.name}</strong><small>{formatSize(selectedFile.size)}</small></span>
+              <button className="remove-file-button" type="button" disabled={uploading} onClick={() => { setSelectedFile(null); setError(""); setUploadSuccess(""); }}>Remove</button>
+            </div>}
+
+            <fieldset className="upload-expiry" disabled={uploading}>
+              <legend>File expiration</legend>
+              <div className="upload-expiry-options" role="group" aria-label="File expiration options">
+                <button type="button" aria-pressed={expiryChoice === "none"} onClick={() => chooseExpiry("none")}>No expiry</button>
+                {uploadExpiryOptions.map((option) => <button key={option.value} type="button" aria-pressed={expiryChoice === option.value} onClick={() => chooseExpiry(option.value)}>{option.label}</button>)}
+                <button type="button" aria-pressed={expiryChoice === "custom"} onClick={() => chooseExpiry("custom")}>Custom</button>
+              </div>
+              {expiryChoice !== "none" && expiryChoice !== "custom" && <p className="expiry-selection-note">Expires {new Date(presetExpiresAt).toLocaleString()}</p>}
+              {expiryChoice === "custom" && <label className="expiration-label" htmlFor="expires-at">Keep until <input id="expires-at" type="datetime-local" value={customExpiresAt} onChange={(event) => { setCustomExpiresAt(event.target.value); setError(""); }} /></label>}
+            </fieldset>
+            {uploading && <div className="upload-progress-state" role="status"><span className="upload-progress-spinner" aria-hidden="true" /> Uploading {selectedFile?.name ?? "your file"}…</div>}
+            {error && <p className="dashboard-error upload-feedback" role="alert">{error}</p>}
+            {uploadSuccess && <p className="upload-success" role="status">{uploadSuccess}</p>}
+            <div className="upload-submit-row"><span className="upload-submit-hint">{selectedFile ? "Ready when you are." : "Choose a file to get started."}</span><button className="primary-button upload-submit" type="submit" disabled={uploading || !selectedFile}>{uploading ? "Uploading…" : "Upload file"}</button></div>
           </div>
         </form>
-
-        {error && <p className="dashboard-error" role="alert">{error}</p>}
 
         <div className="file-list-heading"><h2>Your uploads</h2><span>{files.length} {files.length === 1 ? "file" : "files"}</span></div>
         {loading ? <p className="empty-state">Loading your files…</p> : files.length === 0 ? (

@@ -6,6 +6,7 @@ import App from "./App";
 import { AuthProvider } from "./auth/AuthContext";
 import { getPublicShareUrl, getShareDownloadUrl } from "./lib/api";
 import { DEFAULT_MAX_UPLOAD_BYTES, isWithinUploadLimit, resolveUploadLimit } from "./lib/upload-limit";
+import { customExpirationToIso, getPresetExpiration, uploadExpiryOptions } from "./lib/upload-expiration";
 
 const mebibyte = 1024 * 1024;
 const frontendUploadLimit = Number(import.meta.env.VITE_MAX_UPLOAD_BYTES) || DEFAULT_MAX_UPLOAD_BYTES;
@@ -341,8 +342,8 @@ describe("authentication and dashboard", () => {
     await screen.findByRole("heading", { name: "Your files." });
 
     const file = new File([new Uint8Array(9 * mebibyte)], "nine-mib.pdf", { type: "application/pdf" });
-    fireEvent.change(screen.getByLabelText("Choose a file"), { target: { files: [file] } });
-    await user.click(screen.getByRole("button", { name: "Upload" }));
+    fireEvent.change(document.getElementById("upload-file")!, { target: { files: [file] } });
+    await user.click(screen.getByRole("button", { name: "Upload file" }));
 
     await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledWith("/api/files", expect.objectContaining({ method: "POST" })));
   });
@@ -354,8 +355,8 @@ describe("authentication and dashboard", () => {
     await screen.findByRole("heading", { name: "Your files." });
 
     const file = new File([new Uint8Array(frontendUploadLimit + 1)], "over-limit.pdf", { type: "application/pdf" });
-    fireEvent.change(screen.getByLabelText("Choose a file"), { target: { files: [file] } });
-    await user.click(screen.getByRole("button", { name: "Upload" }));
+    fireEvent.change(document.getElementById("upload-file")!, { target: { files: [file] } });
+    await user.click(screen.getByRole("button", { name: "Upload file" }));
 
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toContain("no larger than");
@@ -363,5 +364,129 @@ describe("authentication and dashboard", () => {
       ? `${frontendUploadLimit / mebibyte} MiB`
       : `${(frontendUploadLimit / mebibyte).toFixed(2)} MiB (${frontendUploadLimit.toLocaleString()} bytes)`);
     expect((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === "POST")).toBe(false);
+  });
+
+  it("selects one file through the native picker and supports replacing and removing it", async () => {
+    const { client } = makeAuthClient(makeSession());
+    const originalCreate = URL.createObjectURL;
+    const originalRevoke = URL.revokeObjectURL;
+    const create = vi.fn().mockReturnValueOnce("blob:first").mockReturnValueOnce("blob:second");
+    const revoke = vi.fn();
+    Object.defineProperty(URL, "createObjectURL", { configurable: true, value: create });
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: revoke });
+    const view = render(<AuthProvider client={client}><App /></AuthProvider>);
+    await screen.findByRole("heading", { name: "Your files." });
+    const input = document.getElementById("upload-file")!;
+    const openPicker = vi.spyOn(input, "click");
+    await userEvent.setup().click(screen.getByRole("button", { name: "Choose a file to upload" }));
+    expect(openPicker).toHaveBeenCalledOnce();
+    fireEvent.change(input, { target: { files: [new File(["a"], "first.png", { type: "image/png" })] } });
+    expect(await screen.findByRole("img", { name: "Preview of first.png" })).toBeTruthy();
+    expect(screen.getByText("1 B")).toBeTruthy();
+    fireEvent.change(input, { target: { files: [new File(["pdf"], "report.pdf", { type: "application/pdf" })] } });
+    expect(await screen.findByText("report.pdf")).toBeTruthy();
+    expect(screen.getByText("PDF", { selector: ".selected-file-icon" })).toBeTruthy();
+    expect(revoke).toHaveBeenCalledWith("blob:first");
+    fireEvent.change(input, { target: { files: [new File(["b"], "second.webp", { type: "image/webp" })] } });
+    expect(await screen.findByRole("img", { name: "Preview of second.webp" })).toBeTruthy();
+    await userEvent.setup().click(screen.getByRole("button", { name: "Remove" }));
+    expect(screen.queryByText("second.webp")).toBeNull();
+    expect(revoke).toHaveBeenCalledWith("blob:second");
+    view.unmount();
+    if (originalCreate) Object.defineProperty(URL, "createObjectURL", { configurable: true, value: originalCreate });
+    else delete (URL as unknown as { createObjectURL?: unknown }).createObjectURL;
+    if (originalRevoke) Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: originalRevoke });
+    else delete (URL as unknown as { revokeObjectURL?: unknown }).revokeObjectURL;
+  });
+
+  it("accepts drag-and-drop files without allowing the browser to open them", async () => {
+    const { client } = makeAuthClient(makeSession());
+    render(<AuthProvider client={client}><App /></AuthProvider>);
+    await screen.findByRole("heading", { name: "Your files." });
+    const dropzone = screen.getByRole("button", { name: "Choose a file to upload" });
+    const file = new File(["hello"], "dropped.txt", { type: "text/plain" });
+    const dataTransfer = { files: [file], types: ["Files"] };
+    fireEvent.dragOver(dropzone, { dataTransfer });
+    expect(dropzone.className).toContain("is-dragging");
+    expect(fireEvent.drop(dropzone, { dataTransfer })).toBe(false);
+    expect(await screen.findByText("dropped.txt")).toBeTruthy();
+    expect(dropzone.className).not.toContain("is-dragging");
+  });
+
+  it.each(uploadExpiryOptions)("computes the $label expiration relative to selection time", ({ value, milliseconds }) => {
+    const now = Date.parse("2026-10-27T10:00:00.000Z");
+    expect(getPresetExpiration(value, now)).toBe(new Date(now + milliseconds).toISOString());
+  });
+
+  it("preserves timezone conversion and rejects missing or past custom expirations", () => {
+    const customDate = "2027-02-03T12:30";
+    expect(customExpirationToIso(customDate)).toBe(new Date(customDate).toISOString());
+    expect(customExpirationToIso("")).toBeUndefined();
+    expect(() => customExpirationToIso("2000-01-01T00:00")).toThrow("future");
+    expect(() => customExpirationToIso("not-a-date")).toThrow("valid custom expiration");
+  });
+
+  it("submits the selected preset expiry through the existing multipart API", async () => {
+    const user = userEvent.setup();
+    const { client } = makeAuthClient(makeSession());
+    render(<AuthProvider client={client}><App /></AuthProvider>);
+    await screen.findByRole("heading", { name: "Your files." });
+    fireEvent.change(document.getElementById("upload-file")!, { target: { files: [new File(["text"], "notes.txt", { type: "text/plain" })] } });
+    const selectedAt = Date.now();
+    await user.click(screen.getByRole("button", { name: "3 Days" }));
+    await user.click(screen.getByRole("button", { name: "Upload file" }));
+    await screen.findByText("upload.pdf uploaded successfully.");
+    const upload = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === "POST");
+    const form = (upload?.[1] as RequestInit).body as FormData;
+    expect(Date.parse(String(form.get("expiresAt")))).toBeGreaterThanOrEqual(selectedAt + 3 * 24 * 60 * 60 * 1000);
+    expect(Date.parse(String(form.get("expiresAt")))).toBeLessThanOrEqual(Date.now() + 3 * 24 * 60 * 60 * 1000);
+  });
+
+  it("requires a future custom expiration before upload", async () => {
+    const user = userEvent.setup();
+    const { client } = makeAuthClient(makeSession());
+    render(<AuthProvider client={client}><App /></AuthProvider>);
+    await screen.findByRole("heading", { name: "Your files." });
+    fireEvent.change(document.getElementById("upload-file")!, { target: { files: [new File(["text"], "notes.txt", { type: "text/plain" })] } });
+    await user.click(screen.getByRole("button", { name: "Custom" }));
+    await user.click(screen.getByRole("button", { name: "Upload file" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("Choose a custom expiration");
+    expect((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === "POST")).toBe(false);
+  });
+
+  it("shows indeterminate upload feedback, prevents duplicate submissions, and reports success", async () => {
+    const { client } = makeAuthClient(makeSession());
+    let completeUpload: ((response: { ok: boolean; status: number; json: () => Promise<unknown> }) => void) | undefined;
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === "/api/files" && init?.method === "POST") return new Promise((resolve) => { completeUpload = resolve; });
+      if (String(input) === "/api/files") return { ok: true, status: 200, json: async () => ({ files: [] }) };
+      return { ok: true, status: 200, json: async () => ({}) };
+    });
+    render(<AuthProvider client={client}><App /></AuthProvider>);
+    await screen.findByRole("heading", { name: "Your files." });
+    fireEvent.change(document.getElementById("upload-file")!, { target: { files: [new File(["text"], "pending.txt", { type: "text/plain" })] } });
+    const form = document.querySelector(".upload-panel")!;
+    fireEvent.submit(form);
+    expect(await screen.findByText("Uploading pending.txt…")).toBeTruthy();
+    expect((document.querySelector(".upload-submit") as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.submit(form);
+    expect((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.filter(([, init]) => (init as RequestInit | undefined)?.method === "POST")).toHaveLength(1);
+    completeUpload?.({ ok: true, status: 201, json: async () => ({ file: { id: "uploaded-id", originalName: "pending.txt", contentType: "text/plain", sizeBytes: 4, createdAt: "2026-10-01T00:00:00.000Z", expiresAt: null } }) });
+    expect(await screen.findByText("pending.txt uploaded successfully.")).toBeTruthy();
+  });
+
+  it("shows a recoverable API error and keeps the selected file after an upload failure", async () => {
+    const user = userEvent.setup();
+    const { client } = makeAuthClient(makeSession());
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => String(input) === "/api/files" && init?.method === "POST"
+      ? { ok: false, status: 413, json: async () => ({ error: { message: "File exceeds the upload size limit" } }) }
+      : { ok: true, status: 200, json: async () => ({ files: [] }) });
+    render(<AuthProvider client={client}><App /></AuthProvider>);
+    await screen.findByRole("heading", { name: "Your files." });
+    fireEvent.change(document.getElementById("upload-file")!, { target: { files: [new File(["text"], "retry.txt", { type: "text/plain" })] } });
+    await user.click(screen.getByRole("button", { name: "Upload file" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("File exceeds the upload size limit");
+    expect(screen.getByText("retry.txt")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Upload file" }) as HTMLButtonElement).disabled).toBe(false);
   });
 });

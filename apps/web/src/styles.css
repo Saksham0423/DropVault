@@ -39,7 +39,7 @@ a { color: inherit; text-decoration: none; }
 
 button, input, select { font: inherit; }
 button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, label:has(input:focus-visible) { outline: 3px solid #71846e55; outline-offset: 3px; }
-.primary-button, .quiet-button, .delete-button, .file-picker, .share-create select, .auth-form input, .expiration-label input { transition: border-color .18s ease, background-color .18s ease, box-shadow .18s ease, color .18s ease, transform .18s ease, opacity .18s ease; }
+.primary-button, .quiet-button, .delete-button, .share-create select, .auth-form input, .expiration-label input { transition: border-color .18s ease, background-color .18s ease, box-shadow .18s ease, color .18s ease, transform .18s ease, opacity .18s ease; }
 .quiet-button:hover:not(:disabled), .delete-button:hover:not(:disabled) { border-color: #c9cec0; background: #f7f7f0; }
 .primary-button:active:not(:disabled), .quiet-button:active:not(:disabled) { transform: translateY(1px); }
 .auth-form input:hover, .expiration-label input:hover, .share-create select:hover { border-color: #c9cec0; }
@@ -166,8 +166,42 @@ footer { padding: 22px 0; border-top: 1px solid #e7e5dd; color: #9a9b93; font-si
 .upload-symbol { display: grid; width: 38px; height: 38px; place-items: center; border-radius: 11px; background: #edf1e8; color: #536d51; font-size: 20px; }
 .upload-copy strong { display: block; font-size: 13px; }
 .upload-copy p { margin: 5px 0 0; color: #85877f; font-size: 11px; }
-.upload-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; }
-.file-picker { display: block; max-width: 180px; overflow: hidden; padding: 10px 12px; border: 1px dashed #d7d9cf; border-radius: 8px; color: #62695f; cursor: pointer; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.upload-workflow { display: grid; width: 100%; gap: 13px; }
+.upload-dropzone { display: flex; width: 100%; min-height: 78px; align-items: center; gap: 12px; padding: 14px 16px; border: 1px dashed #d7d9cf; border-radius: 10px; background: #fbfaf6; color: #4f564d; cursor: pointer; text-align: left; transition: border-color .18s ease, background .18s ease, box-shadow .18s ease, transform .18s ease; }
+.upload-dropzone:hover:not(:disabled), .upload-dropzone.is-dragging { border-color: #82947d; background: #f4f6ef; }
+.upload-dropzone.is-dragging { box-shadow: 0 0 0 3px #71846e20; transform: scale(1.005); }
+.upload-dropzone:disabled { cursor: wait; opacity: .65; }
+.upload-drop-icon { display: grid; width: 38px; height: 38px; flex: 0 0 auto; place-items: center; border-radius: 11px; background: #edf1e8; color: #536d51; font-size: 21px; }
+.upload-drop-text { display: grid; min-width: 0; flex: 1; gap: 5px; }
+.upload-drop-text strong { font-size: 12px; }
+.upload-drop-text small { color: #85877f; font-size: 10px; }
+.upload-browse { flex: 0 0 auto; padding: 8px 11px; border: 1px solid #e2e2d8; border-radius: 7px; background: #fffefa; color: #4f6848; font-size: 10px; font-weight: 700; }
+.selected-file-card { display: flex; min-width: 0; align-items: center; gap: 12px; padding: 11px 13px; border: 1px solid #e7e5dd; border-radius: 10px; background: #fffefa; }
+.selected-image-preview { width: 48px; height: 48px; flex: 0 0 auto; border: 1px solid #e7e5dd; border-radius: 8px; object-fit: cover; background: #f2f1eb; }
+.selected-file-icon { display: grid; width: 42px; height: 48px; flex: 0 0 auto; place-items: center; border: 1px solid #e3e4da; border-radius: 8px; background: #f3f3ec; color: #62705e; font-size: 9px; font-weight: 700; }
+.selected-file-icon.pdf { border-color: #efddda; background: #fbefec; color: #a65347; }
+.selected-file-info { display: grid; min-width: 0; flex: 1; gap: 5px; }
+.selected-file-info strong { overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.selected-file-info small { color: #92958c; font-size: 10px; }
+.remove-file-button { flex: 0 0 auto; padding: 7px 9px; border: 1px solid #e2e2d8; border-radius: 7px; background: #fffefa; color: #74796e; cursor: pointer; font-size: 10px; }
+.remove-file-button:hover:not(:disabled) { border-color: #d6c8c2; color: #9b4b3d; }
+.upload-expiry { min-width: 0; margin: 2px 0 0; padding: 0; border: 0; }
+.upload-expiry legend { margin-bottom: 8px; color: #767a71; font-size: 10px; font-weight: 600; }
+.upload-expiry-options { display: flex; flex-wrap: wrap; gap: 7px; }
+.upload-expiry-options button { min-height: 33px; padding: 0 11px; border: 1px solid #e2e2d8; border-radius: 8px; background: #fffefa; color: #74796e; cursor: pointer; font-size: 10px; transition: background .16s ease, border-color .16s ease, color .16s ease; }
+.upload-expiry-options button:hover:not(:disabled) { border-color: #aab6a3; }
+.upload-expiry-options button[aria-pressed="true"] { border-color: #71846e; background: #edf1e8; color: #405c40; font-weight: 700; }
+.expiry-selection-note { margin: 7px 0 0; color: #85877f; font-size: 10px; }
+.upload-expiry .expiration-label { width: min(100%, 260px); margin-top: 12px; font-size: 10px; }
+.upload-expiry .expiration-label input { width: 100%; min-height: 38px; padding: 8px 10px; font-size: 11px; }
+.upload-progress-state { display: flex; align-items: center; gap: 9px; color: #596c54; font-size: 11px; }
+.upload-progress-spinner { width: 15px; height: 15px; flex: 0 0 auto; border: 2px solid #dfe5da; border-top-color: #496c4b; border-radius: 50%; animation: upload-spin .8s linear infinite; }
+@keyframes upload-spin { to { transform: rotate(360deg); } }
+.upload-feedback { margin: 0; }
+.upload-success { margin: 0; color: #496c4b; font-size: 11px; }
+.upload-submit-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 2px; }
+.upload-submit-hint { color: #96988f; font-size: 10px; }
+.upload-submit { min-width: 112px; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; clip-path: inset(50%); }
 .expiration-label { display: grid; gap: 4px; color: #767a71; font-size: 10px; }
 .expiration-label input { width: auto; padding: 8px; font-size: 10px; }
@@ -245,8 +279,6 @@ footer { padding: 22px 0; border-top: 1px solid #e7e5dd; color: #9a9b93; font-si
   .dashboard-shell { padding: 0 6%; }
   .dashboard-content { padding-top: 45px; }
   .upload-panel { align-items: flex-start; }
-  .upload-controls { width: 100%; align-items: stretch; }
-  .file-picker { flex: 1; max-width: none; }
   .expiration-label input { min-height: 38px; }
   .file-row { gap: 9px; padding-inline: 4px; }
   .expiry-tag { display: none; }
@@ -301,7 +333,12 @@ footer { padding: 22px 0; border-top: 1px solid #e7e5dd; color: #9a9b93; font-si
   .account-controls { gap: 8px; }
   .account-controls > span { max-width: 135px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .dashboard-heading .status-pill { display: none; }
-  .upload-controls .primary-button { flex: 1; }
+  .upload-dropzone { flex-wrap: wrap; padding: 12px; }
+  .upload-browse { margin-left: auto; }
+  .upload-expiry-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .upload-expiry-options button { padding-inline: 5px; }
+  .upload-submit-row { align-items: stretch; flex-direction: column; }
+  .upload-submit { width: 100%; }
   .file-icon { width: 32px; height: 32px; }
   .file-row { flex-wrap: wrap; }
   .file-details { flex-basis: calc(100% - 50px); }
